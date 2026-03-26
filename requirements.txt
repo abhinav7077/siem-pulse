@@ -1,0 +1,19 @@
+# SOC Log Health Monitor — Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# Core
+pandas>=2.0.0
+openpyxl>=3.1.0          # Excel read/write
+pyyaml>=6.0              # Config file parsing
+requests>=2.31.0         # HTTP client for SIEM APIs
+
+# Scheduling
+schedule>=1.2.0          # Periodic job runner (alternative to cron)
+
+# Optional: Enhanced output / future dashboard
+# streamlit>=1.28.0      # Uncomment for web dashboard
+# flask>=3.0.0           # Uncomment for Flask dashboard
+
+# Dev / testing (optional)
+# pytest>=7.4.0
+# python-dotenv>=1.0.0   # Load .env file during development

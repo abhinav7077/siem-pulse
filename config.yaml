@@ -1,0 +1,95 @@
+# ─────────────────────────────────────────────────────────────────
+# SOC Log Health Monitor — Configuration
+# ─────────────────────────────────────────────────────────────────
+# SECURITY: Never hardcode credentials here.
+# All secrets are read from environment variables (see .env.example)
+# ─────────────────────────────────────────────────────────────────
+
+# Device inventory file
+devices:
+  file: sample_devices.xlsx
+  sheet_name: Devices
+
+# Detection logic
+logic:
+  threshold_hours: 24           # Flag device if no logs in this many hours
+
+# ── Performance (for large inventories) ────────────────────────────────────
+performance:
+  threads: 10                   # Parallel threads for SIEM API calls
+                                # Recommended ranges:
+                                #   Small  (<200 devices)  : 5-10
+                                #   Medium (200-1000)      : 10-20
+                                #   Large  (1000-2000+)    : 20-50
+                                # Do NOT exceed SIEM rate limits — check SIEM docs
+                                # Start low (10) and increase if stable
+
+# ── SIEM connection settings ────────────────────────────────────────────────
+siem:
+  max_retries: 3
+  retry_delay_seconds: 5
+  timeout_seconds: 30
+  mock_mode: true               # Set to false to use real SIEM APIs
+
+  # Seceon OTM
+  seceon:
+    base_url: "https://seceon-tenant.seceon.com/api/v2"
+    # Credentials loaded from env: SECEON_API_KEY
+
+  # IBM QRadar
+  qradar:
+    base_url: "https://qradar.yourdomain.com/api"
+    verify_ssl: false
+    # Credentials loaded from env: QRADAR_SEC_TOKEN
+
+  # FortiSIEM
+  fortisiem:
+    base_url: "https://fortisiem.yourdomain.com/phoenix/rest"
+    # Credentials loaded from env: FORTISIEM_USER, FORTISIEM_PASS
+
+  # ── Add more SIEMs below as needed ────────────────────────────
+  # splunk:
+  #   base_url: "https://splunk.yourdomain.com:8089"
+  #   Credentials loaded from env: SPLUNK_TOKEN
+  #
+  # sentinel:
+  #   workspace_id: "your-workspace-id"
+  #   Credentials loaded from env: SENTINEL_CLIENT_ID, SENTINEL_CLIENT_SECRET
+  #
+  # elastic:
+  #   base_url: "https://elastic.yourdomain.com:9200"
+  #   Credentials loaded from env: ELASTIC_API_KEY
+
+# ── Alerting ────────────────────────────────────────────────────────────────
+alerting:
+  email:
+    enabled: true
+    smtp_server: "smtp.example.com"
+    port: 587
+    use_tls: true
+    sender: "soc-monitor@example.com"
+    # Password loaded from env: SMTP_PASSWORD
+    recipients:
+      - "analyst@example.com"
+      - "soc-team@example.com"
+    subject_prefix: "[SOC ALERT]"
+
+  slack:
+    enabled: false
+    # Webhook URL loaded from env: SLACK_WEBHOOK_URL
+    channel: "#soc-alerts"
+
+# ── Reports ─────────────────────────────────────────────────────────────────
+reporting:
+  output_dir: "reports"
+  csv_filename_prefix: "soc_log_report"
+  include_healthy_in_report: true
+
+# ── Scheduler (used with --schedule flag) ───────────────────────────────────
+scheduler:
+  interval_minutes: 60
+
+# ── Logging ─────────────────────────────────────────────────────────────────
+logging:
+  level: INFO                   # DEBUG | INFO | WARNING | ERROR
+  file: "soc_monitor.log"
