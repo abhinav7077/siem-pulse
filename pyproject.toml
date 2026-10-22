@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "siem-pulse"
 dynamic = ["version"]
-description = "SIEM log source health monitor: detect devices that stopped sending logs to IBM QRadar, FortiSIEM and Seceon across many SOC/MSSP clients."
+description = "SIEM log source health monitor: find devices that stopped sending logs to QRadar, Splunk, Sentinel, Elastic, FortiSIEM, Wazuh and more, across many SOC/MSSP clients."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
@@ -13,7 +13,8 @@ license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "The SIEM Pulse Authors" }]
 keywords = [
     "siem", "soc", "mssp", "log-monitoring", "log-source-health",
-    "log-ingestion", "qradar", "fortisiem", "seceon", "security-monitoring",
+    "log-ingestion", "qradar", "fortisiem", "seceon", "splunk", "sentinel", "elastic", "wazuh",
+    "sumologic", "mitre-attack", "security-monitoring",
     "cybersecurity", "blue-team", "security-automation", "alerting",
 ]
 classifiers = [
@@ -45,6 +46,8 @@ dev = ["pytest>=7.4.0", "ruff>=0.6.0"]
 
 [project.urls]
 Homepage = "https://github.com/abhinav7077/siem-pulse"
+Documentation = "https://abhinav7077.github.io/siem-pulse/"
+Changelog = "https://github.com/abhinav7077/siem-pulse/blob/main/CHANGELOG.md"
 Repository = "https://github.com/abhinav7077/siem-pulse"
 Issues = "https://github.com/abhinav7077/siem-pulse/issues"
 Roadmap = "https://github.com/abhinav7077/siem-pulse/blob/main/ROADMAP.md"
@@ -59,7 +62,7 @@ include = ["siem_pulse*"]
 version = { attr = "siem_pulse.__version__" }
 
 [tool.setuptools.package-data]
-siem_pulse = ["templates/*"]
+siem_pulse = ["templates/*", "templates/env.example"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

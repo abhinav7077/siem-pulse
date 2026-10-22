@@ -96,6 +96,25 @@ def load_env_file(path: str = ".env") -> bool:
     return bool(load_dotenv(path, override=False))
 
 
+# ─── Starter files ────────────────────────────────────────────────────────────
+
+def init_project(target: Path) -> int:
+    """Copy the packaged templates into `target` without overwriting anything."""
+    from importlib.resources import files
+    templates = files("siem_pulse") / "templates"
+    copies = {"config.yaml": "config.yaml", "env.example": ".env.example",
+              "sample_devices.xlsx": "sample_devices.xlsx"}
+    for source, name in copies.items():
+        destination = target / name
+        if destination.exists():
+            print(f"  skip   {name} (already exists)")
+            continue
+        destination.write_bytes((templates / source).read_bytes())
+        print(f"  create {name}")
+    print("\n  Next: siem-pulse --dry-run   (mock mode — then set siem.mock_mode: false and add credentials)")
+    return 0
+
+
 # ─── Config ───────────────────────────────────────────────────────────────────
 
 def load_config(config_path: str = "config.yaml") -> dict:
@@ -488,6 +507,8 @@ def main():
     )
 
     parser.add_argument("--version",      action="version",         version=f"siem-pulse {__version__}")
+    parser.add_argument("--init",         action="store_true",
+                        help="Write a starter config.yaml, .env.example and sample inventory here")
     parser.add_argument("--config",       default="config.yaml",    help="Config YAML path")
     parser.add_argument("--env-file",     default=".env",
                         help="Env file with secrets (default: .env, if present)")
@@ -520,6 +541,8 @@ def main():
                         help="Compare inventory with sources the SIEMs know, then exit")
 
     args = parser.parse_args()
+    if args.init:
+        sys.exit(init_project(Path.cwd()))
     load_env_file(args.env_file)
     config = load_config(args.config)
     logger = setup_logging(config)

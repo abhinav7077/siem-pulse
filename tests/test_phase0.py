@@ -33,3 +33,21 @@ def test_missing_env_file_is_fine(tmp_path):
 
 def test_version_is_set():
     assert __version__.count(".") == 2
+
+
+def test_packaged_templates_match_repo_files():
+    """siem-pulse --init copies these; keep them identical to the repo versions."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    templates = root / "siem_pulse" / "templates"
+    assert (templates / "config.yaml").read_text() == (root / "config.yaml").read_text()
+    assert (templates / "env.example").read_text() == (root / ".env.example").read_text()
+    assert (templates / "sample_devices.xlsx").read_bytes() == (root / "sample_devices.xlsx").read_bytes()
+
+
+def test_init_creates_starter_files(tmp_path, capsys):
+    from siem_pulse.cli import init_project
+    assert init_project(tmp_path) == 0
+    assert {p.name for p in tmp_path.iterdir()} == {"config.yaml", ".env.example", "sample_devices.xlsx"}
+    init_project(tmp_path)
+    assert "skip" in capsys.readouterr().out

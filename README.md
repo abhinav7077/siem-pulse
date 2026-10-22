@@ -4,11 +4,18 @@
 [![CI](https://github.com/abhinav7077/siem-pulse/actions/workflows/ci.yml/badge.svg)](https://github.com/abhinav7077/siem-pulse/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![SIEMs: 9 connectors](https://img.shields.io/badge/SIEM-QRadar%20%7C%20Splunk%20%7C%20Sentinel%20%7C%20Elastic%20%7C%20FortiSIEM%20%7C%20Wazuh-informational.svg)](#supported-siems)
+[![PyPI](https://img.shields.io/pypi/v/siem-pulse.svg)](https://pypi.org/project/siem-pulse/)
+[![Docs](https://img.shields.io/badge/docs-abhinav7077.github.io%2Fsiem--pulse-blue.svg)](https://abhinav7077.github.io/siem-pulse/)
+[![Container](https://img.shields.io/badge/container-ghcr.io-informational.svg)](https://github.com/abhinav7077/siem-pulse/pkgs/container/siem-pulse)
 [![Roadmap](https://img.shields.io/badge/roadmap-phases-success.svg)](ROADMAP.md)
 
 **SIEM Pulse** is an open-source Python tool for SOC analysts and MSSPs that detects **silent log sources** — firewalls, servers and other devices that have stopped sending logs to your SIEM. It checks log ingestion across **IBM QRadar**, **Splunk**, **Microsoft Sentinel**, **Elastic**, **FortiSIEM**, **Wazuh**, **Sumo Logic** and **Seceon** — or any platform with a REST API — for many client environments at once, and alerts you by email, Slack, Teams, PagerDuty, Opsgenie, ServiceNow or Jira when a device goes quiet.
 
 A device that stops logging is a blind spot: attacks on it go undetected. SIEM Pulse turns a manual daily "is everything still logging?" check into an automated, scheduled SIEM health check.
+
+📖 **Documentation:** <https://abhinav7077.github.io/siem-pulse/> — setup guides for every SIEM, alerting, detection and deployment.
+
+![SIEM Pulse dashboard: devices, coverage per client, open issues and ATT&CK blind spots](docs/assets/dashboard.png)
 
 > **Keywords:** SIEM log source monitoring · log ingestion health check · silent / stale log source detection · QRadar log source last event time · FortiSIEM device not reporting · SOC automation · MSSP multi-tenant monitoring · blue team tooling
 
@@ -46,59 +53,62 @@ siem-pulse/
 ├── main.py                        # Run from a checkout: python main.py
 ├── config.yaml                    # Configuration (no secrets)
 ├── .env.example                   # Environment variable template
-├── requirements.txt               # Python dependencies
 ├── sample_devices.xlsx            # Example device inventory
+├── Dockerfile, docker-compose.yml # Container image and Compose setup
+├── deploy/                        # Helm chart, Kubernetes, systemd, Grafana
+├── docs/                          # Documentation site (MkDocs)
 ├── tests/                         # pytest suite (no network needed)
 └── siem_pulse/
     ├── cli.py                     # Command line interface (siem-pulse)
-    ├── excel_reader.py            # Reads and validates the inventory (xlsx/csv/yaml)
-    ├── log_checker.py             # Checks last log time per device
+    ├── excel_reader.py            # Inventory files (xlsx / csv / yaml)
+    ├── inventory_sources.py       # ServiceNow CMDB inventory
+    ├── credentials.py             # Secrets providers (env, Vault, AWS, Azure)
+    ├── log_checker.py             # Last-seen check and thresholds
+    ├── detection.py               # Volume, log type, parsing and clock-skew checks
+    ├── coverage.py                # Coverage score and ATT&CK blind spots
+    ├── state_store.py             # SQLite run history
+    ├── suppression.py             # Snoozes and maintenance windows
+    ├── alert_policy.py            # New / reminder / recovered, routing, digest
+    ├── alerting.py                # Sends batches to channels
+    ├── channels/                  # email, Slack, Teams, webhook, PagerDuty, Opsgenie, ServiceNow, Jira
+    ├── reconciler.py              # Inventory vs. SIEM sources
     ├── report_generator.py        # Console + CSV reports
-    ├── alerting.py                # Alert dispatch
-    ├── reconciler.py              # Inventory vs. SIEM source comparison
-    └── siem_clients/
-        ├── base_client.py         # Shared HTTP, tenants, credentials, limits
-        ├── factory.py             # One client per tenant
-        ├── seceon_client.py       # Seceon API client
-        ├── qradar_client.py       # IBM QRadar API client
-        └── fortisiem_client.py    # FortiSIEM API client
+    ├── dashboard.py               # Web dashboard, API, Prometheus metrics
+    ├── ops.py                     # JSON logs, heartbeat, metrics textfile
+    ├── templates/                 # Files written by `siem-pulse --init`
+    └── siem_clients/              # One module per SIEM + shared base and factory
 ```
-
----
 
 ## Quick Start
 
-### 1. Clone the project
+### 1. Install
 
 ```bash
-git clone https://github.com/abhinav7077/siem-pulse.git
-cd siem-pulse
+pip install siem-pulse                 # Python 3.10+
+mkdir siem-pulse && cd siem-pulse
+siem-pulse --init                      # starter config.yaml, .env.example, sample_devices.xlsx
 ```
 
-### 2. Install dependencies
+Or with Docker: `docker compose up -d` (see [Deploy](#deploy)). Or from source: `git clone https://github.com/abhinav7077/siem-pulse.git && cd siem-pulse && pip install -e ".[dev]"` and use `python main.py` instead of `siem-pulse`.
+
+### 2. Try it in mock mode
+
+The starter config has `siem.mock_mode: true`, so everything works without a SIEM:
 
 ```bash
-pip install -r requirements.txt
+siem-pulse --dry-run          # which devices would be checked
+siem-pulse                    # one check: console table, CSV report, alerts, history
+siem-pulse --reconcile        # inventory vs. what the SIEM knows
+siem-pulse --dashboard        # http://127.0.0.1:8080
 ```
 
-### 3. Configure environment variables
+### 3. Configure credentials
 
 ```bash
-cp .env.example .env
-# Edit .env with your real credentials
+cp .env.example .env          # add the credentials for your SIEM(s) and alert channels
 ```
 
-Your `.env` file (never commit this):
-```
-SECEON_API_KEY=your_api_key
-QRADAR_SEC_TOKEN=your_sec_token
-FORTISIEM_USER=admin
-FORTISIEM_PASS=your_password
-SMTP_PASSWORD=your_smtp_password
-SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
-```
-
-The `.env` file in the current directory is loaded automatically (use `--env-file` for another path). Variables already set in your environment take priority.
+The `.env` file in the current directory is loaded automatically (use `--env-file` for another path). Variables already set in your environment take priority. Never commit `.env`.
 
 ### 4. Populate your device inventory
 
@@ -108,7 +118,7 @@ Edit `sample_devices.xlsx` (the `Devices` sheet), or use a `.csv` or `.yaml` fil
 |--------|----------|-------------|
 | `device_name` | ✅ | Hostname or label |
 | `ip_address` | ✅ | Device IP address |
-| `siem_platform` | ✅ | `seceon` / `qradar` / `fortisiem` |
+| `siem_platform` | ✅ | `qradar` / `splunk` / `sentinel` / `elastic` / `fortisiem` / `wazuh` / `sumologic` / `seceon` / `generic_rest` |
 | `client_name` | Optional | Client/tenant name |
 | `api_endpoint` | Optional | SIEM API URL for this device's client (overrides `base_url`) |
 | `auth_ref` | Optional | Client/tenant key: picks `tenants:` overrides in config and prefixed credentials (see [Multi-client setups](#multi-client-setups)) |
@@ -120,29 +130,17 @@ Edit `sample_devices.xlsx` (the `Devices` sheet), or use a `.csv` or `.yaml` fil
 | `expected_log_types` | Optional | e.g. `traffic;system` — log types the device should send |
 | `min_events_per_hour` | Optional | Alert if volume falls below this |
 
-### 5. Run the monitor
+### 5. Run against your SIEM
+
+Set `siem.mock_mode: false` and your SIEM's `base_url` in `config.yaml`, then:
 
 ```bash
-# Single run (mock mode — no real API calls)
-python main.py
-
-# Single run with real APIs (set mock_mode: false in config.yaml)
-python main.py
-
-# Run on a schedule (every 60 minutes by default)
-python main.py --schedule
-
-# Use a custom device file (.xlsx, .csv or .yaml)
-python main.py --device-file /path/to/my_devices.xlsx
-
-# Compare the inventory with what the SIEMs know (unmonitored / unknown devices)
-python main.py --reconcile
-
-# Use a different config
-python main.py --config /path/to/my_config.yaml
+siem-pulse --dry-run                       # check the inventory
+siem-pulse                                 # one run
+siem-pulse --siem qradar --client "Acme"   # limit to one SIEM / client
+siem-pulse --schedule                      # every scheduler.interval_minutes
+siem-pulse --help                          # all commands
 ```
-
----
 
 ## Configuration (`config.yaml`)
 
@@ -400,18 +398,7 @@ The report prints to the console and is saved as `reports/soc_log_report_reconci
 
 ## Adding a New SIEM Platform
 
-1. Create `modules/siem_clients/my_siem_client.py` inheriting `BaseSIEMClient`
-2. Implement `get_last_log_time(device) -> Optional[datetime]`. Use `self._request()` for HTTP (it handles retries, TLS, rate limits) and `self.credential("MYSIEM_TOKEN")` for secrets (it handles `auth_ref` prefixes)
-3. Optional: set `supports_inventory = True` and implement `_fetch_inventory()` to get bulk lookups and `--reconcile`
-4. Register it in `modules/siem_clients/factory.py`:
-   ```python
-   from .my_siem_client import MySIEMClient
-   SIEM_REGISTRY["mysiem"] = MySIEMClient
-   ```
-5. Add config section under `siem:` in `config.yaml`
-6. Add devices with `siem_platform: mysiem` to your inventory
-
----
+Write a connector class (subclass `InventoryClient` for bulk APIs or `BaseSIEMClient` for per-device APIs) and either register it in `siem_pulse/siem_clients/factory.py` or publish it as a plugin under the `siem_pulse.connectors` entry point. Step-by-step example: [docs/plugins.md](docs/plugins.md).
 
 ## Output
 
@@ -493,7 +480,7 @@ Tests use a fake HTTP layer, so they never contact a real SIEM. CI runs them on 
 
 ## Contributing
 
-Contributions are welcome — new SIEM connectors and alert channels especially. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Contributions are welcome — new SIEM connectors and alert channels especially. See [CONTRIBUTING.md](CONTRIBUTING.md), the [Code of Conduct](CODE_OF_CONDUCT.md) and the [Security Policy](SECURITY.md). Release history: [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

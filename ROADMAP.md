@@ -9,18 +9,20 @@ before starting the next one.
 
 | Phase | Theme | Outcome |
 |-------|-------|---------|
-| [0](#phase-0--foundation-and-discoverability) | Foundation & discoverability | Licensed, documented, findable, tested |
-| [1](#phase-1--correctness-against-real-siems) | Correctness against real SIEMs | Real API calls return correct results |
-| [2](#phase-2--multi-tenant-and-scale) | Multi-tenant & scale | 100+ clients, 2,000+ devices in minutes |
-| [3](#phase-3--alert-quality) | Alert quality | Alerts analysts trust, not noise |
-| [4](#phase-4--deeper-detection) | Deeper detection | Catch "alive but broken" log sources |
-| [5](#phase-5--integrations) | Integrations | More SIEMs, alert channels and ticketing |
-| [6](#phase-6--dashboard-and-operations) | Dashboard & operations | Easy to run, observe and deploy |
-| [7](#phase-7--community-and-releases) | Community & releases | Installable package, contributors, adoption |
+| [0](#phase-0) | Foundation & discoverability | Licensed, documented, findable, tested |
+| [1](#phase-1) | Correctness against real SIEMs | Real API calls return correct results |
+| [2](#phase-2) | Multi-tenant & scale | 100+ clients, 2,000+ devices in minutes |
+| [3](#phase-3) | Alert quality | Alerts analysts trust, not noise |
+| [4](#phase-4) | Deeper detection | Catch "alive but broken" log sources |
+| [5](#phase-5) | Integrations | More SIEMs, alert channels and ticketing |
+| [6](#phase-6) | Dashboard & operations | Easy to run, observe and deploy |
+| [7](#phase-7) | Community & releases | Installable package, contributors, adoption |
 
 Legend: `[x]` done · `[ ]` to do
 
 ---
+
+<a id="phase-0"></a>
 
 ## Phase 0 — Foundation and discoverability
 
@@ -31,8 +33,9 @@ on GitHub and search engines.
 - [x] Search-friendly README: clear title, problem statement, keywords, badges
 - [x] `pyproject.toml` with description, keywords, classifiers and project URLs
 - [x] Public roadmap (this file) and `CONTRIBUTING.md`
-- [ ] Add a GitHub repository description and topics (see [Discoverability checklist](#discoverability-checklist))
-- [ ] Add a social preview image (GitHub → Settings → Social preview)
+- [ ] *(manual)* Add a GitHub repository description and topics (see the [Discoverability checklist](#discoverability))
+- [x] Social preview image ready at `docs/assets/social-preview.png`
+- [ ] *(manual)* Upload it: GitHub → Settings → Social preview
 - [x] Unit tests with `pytest` (mocked HTTP per SIEM)
 - [x] GitHub Actions CI: tests + mock-mode smoke run, Python 3.10–3.13 matrix
 - [x] Add a linter (`ruff`) to CI
@@ -43,6 +46,8 @@ on GitHub and search engines.
 GitHub for "SIEM log source monitoring".
 
 ---
+
+<a id="phase-1"></a>
 
 ## Phase 1 — Correctness against real SIEMs
 
@@ -80,6 +85,8 @@ manual run against one real tenant per SIEM *(needs access to real tenants)*.
 
 ---
 
+<a id="phase-2"></a>
+
 ## Phase 2 — Multi-tenant and scale
 
 **Goal:** monitor 100+ client environments and 2,000+ devices accurately and fast.
@@ -102,6 +109,8 @@ Still needs confirming against real tenants.)*
 
 ---
 
+<a id="phase-3"></a>
+
 ## Phase 3 — Alert quality
 
 **Goal:** every alert is actionable; repeated or expected outages do not spam the team.
@@ -122,6 +131,8 @@ reminder → recovered.)*
 
 ---
 
+<a id="phase-4"></a>
+
 ## Phase 4 — Deeper detection
 
 **Goal:** catch log sources that are sending *something* but not the right thing.
@@ -138,6 +149,8 @@ an alert within one run. *(Covered by tests; real-SIEM metric queries still
 need a live check — see the testing notes in the pull request.)*
 
 ---
+
+<a id="phase-5"></a>
 
 ## Phase 5 — Integrations
 
@@ -163,6 +176,8 @@ need a live check — see the testing notes in the pull request.)*
 
 ---
 
+<a id="phase-6"></a>
+
 ## Phase 6 — Dashboard and operations
 
 **Goal:** make SIEM Pulse easy to deploy, run and watch.
@@ -181,22 +196,32 @@ need a live check — see the testing notes in the pull request.)*
 
 ---
 
+<a id="phase-7"></a>
+
 ## Phase 7 — Community and releases
 
 **Goal:** make SIEM Pulse easy to adopt and contribute to.
 
-- [ ] Publish to PyPI (`pip install siem-pulse`) with a `siem-pulse` CLI command
-- [ ] Semantic versioning, `CHANGELOG.md`, GitHub Releases
-- [ ] Documentation site on GitHub Pages (MkDocs Material): setup guides per SIEM
-- [ ] `SECURITY.md` with a vulnerability reporting process
-- [ ] Issue and pull request templates; "good first issue" labels (new connectors are ideal)
-- [ ] Code of conduct
-- [ ] Submit to curated lists (e.g. awesome-security, awesome-siem, awesome-soc)
-- [ ] Write-ups: blog post / LinkedIn article on "detecting silent log sources"
+- [x] PyPI-ready package with a `siem-pulse` CLI command and `--init`
+- [x] Release workflow: tests, PyPI (trusted publishing), GitHub release, multi-arch image on GHCR
+- [ ] *(manual)* First release: add the PyPI trusted publisher, then push tag `v0.2.0`
+- [x] Semantic versioning, `CHANGELOG.md`, GitHub Releases (automated from the changelog)
+- [x] Documentation site (MkDocs Material) with setup guides per SIEM, built in CI
+- [ ] *(manual)* Enable GitHub Pages: Settings → Pages → Source: GitHub Actions
+- [x] `SECURITY.md` with a private vulnerability reporting process
+- [x] Issue forms (bug, feature, new connector) and a pull request template; Dependabot
+- [ ] *(manual)* Create labels `good first issue`, `connector`, `help wanted` and open starter issues
+- [x] Code of conduct (Contributor Covenant 2.1) and `CITATION.cff`
+- [ ] *(manual)* Submit to curated lists (e.g. awesome-security, awesome-siem, awesome-soc) after the first release
+- [x] Blog post "Detecting silent log sources" on the docs site
+- [ ] *(manual)* Share it: LinkedIn, r/blueteamsec, r/cybersecurity, SOC communities
 
 **Exit check:** first external contribution merged and package downloadable from PyPI.
+*(Everything is automated; the remaining steps need the repository owner's accounts.)*
 
 ---
+
+<a id="discoverability"></a>
 
 ## Discoverability checklist
 
@@ -208,11 +233,11 @@ Things that help people find SIEM Pulse on GitHub and Google. Items marked
 - [x] `pyproject.toml` keywords and classifiers (used by PyPI search)
 - [x] Recognised open-source license (GitHub shows "Apache-2.0" in the sidebar)
 - [ ] *(manual)* Repository description:
-  `Open-source SIEM log source health monitor — detect devices that stopped sending logs to IBM QRadar, FortiSIEM and Seceon. Multi-client SOC/MSSP automation in Python.`
-- [ ] *(manual)* Website field: link to the docs site once Phase 7 adds it
+  `Open-source SIEM log source health monitor — find devices that stopped sending logs to QRadar, Splunk, Sentinel, Elastic, FortiSIEM, Wazuh and more. Multi-client SOC/MSSP automation in Python.`
+- [ ] *(manual)* Website field: `https://abhinav7077.github.io/siem-pulse/`
 - [ ] *(manual)* Repository topics:
-  `siem`, `soc`, `log-monitoring`, `log-management`, `security-monitoring`, `qradar`, `fortisiem`, `seceon`, `mssp`, `blue-team`, `cybersecurity`, `security-automation`, `log-source-health`, `python`, `threat-detection`
-- [ ] *(manual)* Social preview image (1280×640) with name and tagline
-- [ ] Publish a GitHub Release (releases are indexed and show in the sidebar)
-- [ ] PyPI package and docs site (each is another indexed page linking back)
+  `siem`, `soc`, `log-monitoring`, `log-management`, `security-monitoring`, `qradar`, `splunk`, `microsoft-sentinel`, `elastic`, `fortisiem`, `wazuh`, `mssp`, `blue-team`, `cybersecurity`, `security-automation`, `mitre-attack`, `python`, `threat-detection`, `log-source-health`, `seceon`
+- [ ] *(manual)* Upload the social preview image `docs/assets/social-preview.png` (1280×640)
+- [ ] Publish a GitHub Release — automated by pushing tag `v0.2.0`
+- [x] PyPI package metadata and docs site with keyword-rich pages and a blog post (go live with the first release / Pages)
 - [ ] Share in communities: r/blueteamsec, r/cybersecurity, LinkedIn, SOC Discord/Slack groups
