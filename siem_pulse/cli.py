@@ -37,7 +37,7 @@ import yaml
 
 from siem_pulse import __version__
 
-from siem_pulse.excel_reader import ExcelReader
+from siem_pulse.inventory_sources import load_inventory
 from siem_pulse.log_checker import LogChecker
 from siem_pulse.alerting import AlertManager
 from siem_pulse.reconciler import print_reconcile, reconcile, save_reconcile_csv
@@ -184,8 +184,7 @@ def load_filtered_devices(
     filter_client: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Load the inventory and apply the optional --siem / --client filters."""
-    reader = ExcelReader(device_file, sheet_name=sheet_name(config))
-    devices = reader.load_devices()
+    devices = load_inventory(config, device_file, sheet_name(config))
     logger.info(f"Inventory total : {len(devices)} devices")
 
     if filter_siem:
@@ -398,8 +397,7 @@ def main():
 
     # ── Discovery helpers (list and exit) ──────────────────────────────────────
     if args.list_clients or args.list_siems:
-        reader = ExcelReader(device_file, sheet_name=sheet_name(config))
-        devices = reader.load_devices()
+        devices = load_inventory(config, device_file, sheet_name(config))
 
         if args.list_clients:
             clients = sorted(set(d.get("client_name", "N/A") or "N/A" for d in devices))

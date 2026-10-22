@@ -219,6 +219,23 @@ siem:
         verify_ssl: "/etc/ssl/acme-ca.pem"
 ```
 
+## Secrets managers
+
+By default credentials come from environment variables (or `.env`). To use a secrets manager, set `secrets.provider` in `config.yaml`:
+
+| Provider | Where a secret lives | Extra install |
+|----------|----------------------|---------------|
+| `env` (default) | `ACME_QRADAR_SEC_TOKEN` (tenant prefix + name) | – |
+| `vault` | HashiCorp Vault KV v2 at `<mount>/siem-pulse/<tenant>`, key `QRADAR_SEC_TOKEN`; token from `VAULT_TOKEN` | – |
+| `aws` | AWS Secrets Manager JSON secret `siem-pulse/<tenant>`, key `QRADAR_SEC_TOKEN` | `boto3` |
+| `azure` | Azure Key Vault secret `ACME-QRADAR-SEC-TOKEN` | `azure-identity azure-keyvault-secrets` |
+
+Devices without an `auth_ref` use the tenant `default`. A tenant's lookup never falls back to `default`.
+
+## Inventory from ServiceNow
+
+Set `devices.source: servicenow` to read devices from a CMDB table instead of a file. Map ServiceNow fields to inventory columns with `field_map`, and fill gaps with `defaults`. Credentials: `SERVICENOW_USER` / `SERVICENOW_PASS`. See the commented example in `config.yaml`.
+
 ## Bulk lookups and reconciliation
 
 | SIEM | Bulk mode | How |

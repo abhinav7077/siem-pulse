@@ -26,9 +26,7 @@ Tenants (multi-client setups):
 
 import ipaddress
 import logging
-import os
 import random
-import re
 import threading
 import time
 import warnings
@@ -39,6 +37,8 @@ from typing import Any, Dict, List, Optional, Union
 
 import requests
 from urllib3.exceptions import InsecureRequestWarning
+
+from ..credentials import SecretError, env_prefix, get_resolver  # noqa: F401  (env_prefix re-exported)
 
 
 # ─── Errors ───────────────────────────────────────────────────────────────────
@@ -99,11 +99,6 @@ def epoch_to_datetime(value: Union[int, float, str]) -> datetime:
     return datetime.fromtimestamp(number, tz=timezone.utc)
 
 
-def env_prefix(auth_ref: Optional[str]) -> str:
-    """'Acme Corp-1' -> 'ACME_CORP_1_' (empty string when no auth_ref)."""
-    if not auth_ref:
-        return ""
-    return re.sub(r"[^A-Z0-9]+", "_", str(auth_ref).upper()).strip("_") + "_"
 
 
 class RateLimiter:
@@ -209,15 +204,23 @@ class BaseSIEMClient(ABC):
 
     def credential(self, name: str) -> str:
         """
-        Read a credential from the environment.
-        With an auth_ref, only the prefixed variable is used (no fallback).
+        Read a credential from the configured secrets provider (default: env).
+        With an auth_ref, only that tenant's secret is used (never the default).
         Missing values are remembered and reported when a request is made.
         """
-        var = env_prefix(self.auth_ref) + name
-        value = os.environ.get(var, "")
-        if not value and not self.mock_mode:
-            self._missing_credentials.append(var)
-            self.logger.warning(f"{var} environment variable is not set.")
+        if self.mock_mode:
+            return ""
+        resolver = get_resolver(self.config)
+        where = resolver.describe(name, self.auth_ref)
+        try:
+            value = resolver.get(name, self.auth_ref) or ""
+        except SecretError as e:
+            self._missing_credentials.append(f"{where} ({e})")
+            self.logger.error(f"Cannot read {where}: {e}")
+            return ""
+        if not value:
+            self._missing_credentials.append(where)
+            self.logger.warning(f"Credential not set: {where}")
         return value
 
     def _require_credentials(self):

@@ -5,10 +5,25 @@
 # All secrets are read from environment variables (see .env.example)
 # ─────────────────────────────────────────────────────────────────
 
-# Device inventory file
+# Device inventory
 devices:
+  source: file                  # file (.xlsx / .csv / .yaml) | servicenow
   file: sample_devices.xlsx
   sheet_name: Devices
+  # servicenow:                 # Used when source: servicenow (SERVICENOW_USER / SERVICENOW_PASS)
+  #   instance_url: "https://acme.service-now.com"
+  #   table: cmdb_ci
+  #   query: "operational_status=1^u_siem_platformISNOTEMPTY"
+  #   field_map: {device_name: name, ip_address: ip_address, siem_platform: u_siem_platform, client_name: company}
+  #   defaults: {siem_platform: qradar}
+
+# Where credentials come from
+secrets:
+  provider: env                 # env | vault | aws | azure
+  fallback_to_env: true         # Also check env vars when the provider has no value
+  # vault: {addr: "https://vault.example:8200", mount: secret, path_template: "siem-pulse/{tenant}"}   # VAULT_TOKEN
+  # aws:   {region: us-east-1, secret_id_template: "siem-pulse/{tenant}"}    # pip install boto3
+  # azure: {vault_url: "https://my-vault.vault.azure.net"}                   # pip install azure-identity azure-keyvault-secrets
 
 # Detection logic
 logic:

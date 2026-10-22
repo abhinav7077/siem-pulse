@@ -64,7 +64,21 @@ class ExcelReader:
             df = self._read_frame()
         except Exception as e:
             raise ValueError(f"Failed to read inventory file '{self.file_path}': {e}") from e
+        return self.devices_from_frame(df, source=str(self.file_path))
 
+    @classmethod
+    def from_records(cls, records: List[Dict[str, Any]], source: str = "records") -> List[Dict[str, Any]]:
+        """Validate devices that came from somewhere other than a file (e.g. a CMDB)."""
+        frame = pd.DataFrame(
+            [{str(k): (None if v is None else str(v)) for k, v in r.items()} for r in records],
+            dtype=object,
+        )
+        if frame.empty:
+            frame = pd.DataFrame(columns=sorted(REQUIRED_COLUMNS))
+        return cls("<memory>").devices_from_frame(frame, source=source)
+
+    def devices_from_frame(self, df: pd.DataFrame, source: str = "inventory") -> List[Dict[str, Any]]:
+        """Normalise columns, validate rows and return device dicts."""
         # Normalize column names: strip whitespace, lowercase
         df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
 
@@ -72,7 +86,7 @@ class ExcelReader:
         missing = REQUIRED_COLUMNS - set(df.columns)
         if missing:
             raise ValueError(
-                f"Excel file is missing required columns: {missing}. "
+                f"{source} is missing required columns: {missing}. "
                 f"Found columns: {list(df.columns)}"
             )
 

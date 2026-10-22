@@ -87,12 +87,12 @@ manual run against one real tenant per SIEM *(needs access to real tenants)*.
 - [x] Use the `api_endpoint` and `auth_ref` inventory columns
 - [x] Cache SIEM clients per `(platform, endpoint, auth_ref)` instead of per platform
 - [x] Credential lookup per tenant (`<AUTH_REF>_<VAR>` env vars, no fallback to default credentials)
-- [ ] Secrets manager backends: HashiCorp Vault, AWS Secrets Manager, Azure Key Vault
+- [x] Secrets manager backends: HashiCorp Vault, AWS Secrets Manager, Azure Key Vault
 - [x] **Bulk mode:** one "list all log sources + last seen" call per SIEM tenant, matched locally against the inventory (turns thousands of API calls into a handful)
 - [x] **Inventory reconciliation:** report sources in the SIEM but not in Excel, and devices in Excel never seen by the SIEM
 - [x] Per-SIEM rate limiting and concurrency limits
 - [x] Inventory files besides Excel: CSV and YAML
-- [ ] Inventory from a CMDB / ServiceNow API
+- [x] Inventory from a CMDB / ServiceNow API
 - [x] Reuse HTTP sessions (`requests.Session`) for connection pooling
 
 **Exit check:** a 2,000-device, 100-client run finishes in under 5 minutes with
