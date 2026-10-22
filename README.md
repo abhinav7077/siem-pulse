@@ -1,8 +1,15 @@
-# SOC Log Health Monitor 🔍
+# SIEM Pulse — Log Source Health Monitor for QRadar, FortiSIEM & Seceon
 
-A Python automation tool for SOC analysts to monitor log ingestion from multiple SIEM platforms — **Seceon OTM**, **IBM QRadar**, and **FortiSIEM** — across multiple client environments.
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![SIEM: QRadar | FortiSIEM | Seceon](https://img.shields.io/badge/SIEM-QRadar%20%7C%20FortiSIEM%20%7C%20Seceon-informational.svg)](#connecting-to-real-siem-apis)
+[![Roadmap](https://img.shields.io/badge/roadmap-phases-success.svg)](ROADMAP.md)
 
-The tool checks whether devices listed in your device inventory are sending logs within the last 24 hours and alerts you when they're not.
+**SIEM Pulse** is an open-source Python tool for SOC analysts and MSSPs that detects **silent log sources** — firewalls, servers and other devices that have stopped sending logs to your SIEM. It checks log ingestion across **IBM QRadar**, **FortiSIEM** and **Seceon OTM** for many client environments at once, and alerts you by email or Slack when a device goes quiet.
+
+A device that stops logging is a blind spot: attacks on it go undetected. SIEM Pulse turns a manual daily "is everything still logging?" check into an automated, scheduled SIEM health check.
+
+> **Keywords:** SIEM log source monitoring · log ingestion health check · silent / stale log source detection · QRadar log source last event time · FortiSIEM device not reporting · SOC automation · MSSP multi-tenant monitoring · blue team tooling
 
 ---
 
@@ -24,7 +31,7 @@ The tool checks whether devices listed in your device inventory are sending logs
 ## Project Structure
 
 ```
-soc_log_health_monitor/
+siem-pulse/
 ├── main.py                        # Entry point
 ├── config.yaml                    # Configuration (no secrets)
 ├── .env.example                   # Environment variable template
@@ -49,10 +56,11 @@ soc_log_health_monitor/
 
 ## Quick Start
 
-### 1. Clone / download the project
+### 1. Clone the project
 
 ```bash
-cd soc_log_health_monitor
+git clone https://github.com/abhinav7077/siem-pulse.git
+cd siem-pulse
 ```
 
 ### 2. Install dependencies
@@ -83,7 +91,7 @@ Load the `.env` file before running:
 # Linux/Mac
 export $(cat .env | xargs)
 
-# Or install python-dotenv and it loads automatically
+# Automatic .env loading (python-dotenv) is planned — see ROADMAP.md
 ```
 
 ### 4. Populate your device inventory
@@ -233,14 +241,9 @@ HTML-formatted email listing all stale and error devices, sent to configured rec
 
 ---
 
-## Future Enhancements (Roadmap)
+## Roadmap
 
-- [ ] **Streamlit dashboard** — Live web UI showing device health status
-- [ ] **SQLite/PostgreSQL storage** — Historical trend tracking
-- [ ] **Multi-threading** — Parallel SIEM queries for large device inventories
-- [ ] **PagerDuty / Teams integration** — Additional alert channels
-- [ ] **Auto-remediation hooks** — Trigger tickets in ServiceNow/Jira
-- [ ] **Per-device custom thresholds** — Some devices may have longer expected gaps
+The phase-wise improvement plan — real-API fixes, multi-tenant support, smarter alerts, volume-drop detection, more SIEMs (Splunk, Sentinel, Elastic, Wazuh) and a dashboard — is in **[ROADMAP.md](ROADMAP.md)**.
 
 ---
 
@@ -253,3 +256,13 @@ HTML-formatted email listing all stale and error devices, sent to configured rec
 | All devices show ERROR | Ensure `mock_mode: true` in config or verify SIEM connectivity |
 | Email not sending | Check `SMTP_PASSWORD`, SMTP server, and port 587 access |
 | `Unknown SIEM platform` | Ensure `siem_platform` column in Excel uses lowercase: `seceon`, `qradar`, `fortisiem` |
+
+---
+
+## Contributing
+
+Contributions are welcome — new SIEM connectors and alert channels especially. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE). You may use, modify and distribute this software, including commercially, under the terms of that license. See [NOTICE](NOTICE).
