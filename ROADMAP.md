@@ -33,8 +33,9 @@ on GitHub and search engines.
 - [x] Public roadmap (this file) and `CONTRIBUTING.md`
 - [ ] Add a GitHub repository description and topics (see [Discoverability checklist](#discoverability-checklist))
 - [ ] Add a social preview image (GitHub → Settings → Social preview)
-- [ ] Unit tests with `pytest` (seeded mock mode, mocked HTTP per SIEM)
-- [ ] GitHub Actions CI: lint (`ruff`), tests, Python 3.10–3.13 matrix
+- [x] Unit tests with `pytest` (mocked HTTP per SIEM)
+- [x] GitHub Actions CI: tests + mock-mode smoke run, Python 3.10–3.13 matrix
+- [ ] Add a linter (`ruff`) to CI
 - [ ] Load `.env` automatically with `python-dotenv`
 - [ ] Make mock mode deterministic (`mock_seed` in config) so demos and tests repeat
 
@@ -49,32 +50,33 @@ GitHub for "SIEM log source monitoring".
 time for every device.
 
 ### IBM QRadar
-- [ ] Poll `GET /ariel/searches/{id}` until `COMPLETED` before reading results (currently reads immediately)
-- [ ] Use `GET /config/event_sources/log_source_management/log_sources` and its `last_event_time` field instead of an AQL query per device
-- [ ] If AQL is kept, match on log source (`logsourceid` / `LOGSOURCENAME`), not `sourceip`
-- [ ] Validate IP addresses before building any query (prevents AQL injection)
+- [x] Poll `GET /ariel/searches/{id}` until `COMPLETED` before reading results (currently reads immediately)
+- [x] Use `GET /config/event_sources/log_source_management/log_sources` and its `last_event_time` field instead of an AQL query per device
+- [x] If AQL is kept, match on log source (`logsourceid` / `LOGSOURCENAME`), not `sourceip`
+- [x] Validate IP addresses before building any query (prevents AQL injection)
 
 ### FortiSIEM
-- [ ] Implement the real XML query flow: submit query → poll progress → fetch events
-- [ ] Honour a `verify_ssl` setting instead of hardcoded `verify=False`
+- [x] Implement the real XML query flow: submit query → poll progress → fetch events
+- [x] Honour a `verify_ssl` setting (true / false / CA bundle path) for every SIEM instead of hardcoded `verify=False`
 - [ ] Optionally use CMDB device `lastEventTime` for a bulk lookup
 
 ### Seceon OTM
-- [ ] Replace the guessed `/devices/{ip}/lastlog` endpoint with the documented API
-- [ ] Add response-schema validation with clear error messages
+- [x] Make the endpoint path, timestamp fields and auth header configurable (Seceon's API is documented per tenant)
+- [ ] Confirm the default path/fields against a real Seceon tenant and update the defaults
+- [x] Add response-schema validation with clear error messages
 
 ### Core fixes
-- [ ] Do not retry on 401/403 or other non-retryable errors; retry only timeouts, 429 and 5xx
-- [ ] Respect `Retry-After` on HTTP 429
-- [ ] Pass `devices.sheet_name` from config to `ExcelReader`
-- [ ] Write an empty value instead of `inf` for "never seen" in the CSV
-- [ ] Replace deprecated `datetime.utcnow()` with timezone-aware UTC
-- [ ] HTML-escape device names and error text in alert emails
-- [ ] Fix the email footer hint that prints `--client "ALL devices"`
-- [ ] Keep a single source of truth for supported SIEMs (registry, not two lists)
+- [x] Do not retry on 401/403 or other non-retryable errors; retry only timeouts, 429 and 5xx
+- [x] Respect `Retry-After` on HTTP 429
+- [x] Pass `devices.sheet_name` from config to `ExcelReader`
+- [x] Write an empty value instead of `inf` for "never seen" in the CSV
+- [x] Replace deprecated `datetime.utcnow()` with timezone-aware UTC
+- [x] HTML-escape device names and error text in alert emails
+- [x] Fix the email footer hint that prints `--client "ALL devices"`
+- [x] Keep a single source of truth for supported SIEMs (registry, not two lists)
 
-**Exit check:** each connector passes recorded-response tests and a manual run
-against one real tenant per SIEM.
+**Exit check:** each connector passes recorded-response tests *(done)* and a
+manual run against one real tenant per SIEM *(needs access to real tenants)*.
 
 ---
 

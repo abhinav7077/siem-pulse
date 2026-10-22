@@ -26,26 +26,46 @@ performance:
 
 # ── SIEM connection settings ────────────────────────────────────────────────
 siem:
-  max_retries: 3
-  retry_delay_seconds: 5
+  max_retries: 3                # Only temporary errors are retried (timeouts, 5xx, 429)
+  retry_delay_seconds: 5        # Backoff base: 5s, 10s, 20s ...
+  max_retry_after_seconds: 300  # Cap on how long to honour a SIEM's Retry-After header
   timeout_seconds: 30
   mock_mode: true               # Set to false to use real SIEM APIs
 
-  # Seceon OTM
+  # verify_ssl (every SIEM): true (default) | false | "/path/to/ca-bundle.pem"
+
+  # Seceon aiSIEM / OTM — check your tenant's API docs for the exact path/fields
   seceon:
     base_url: "https://seceon-tenant.seceon.com/api/v2"
+    verify_ssl: true
+    last_log_path: "/devices/{ip}/lastlog"            # {ip} and {device_name} allowed
+    timestamp_fields: ["last_event_time", "lastEventTime"]  # dots for nested: "data.last_seen"
+    auth_header: "Authorization"
+    auth_scheme: "Bearer"
     # Credentials loaded from env: SECEON_API_KEY
 
   # IBM QRadar
   qradar:
     base_url: "https://qradar.yourdomain.com/api"
-    verify_ssl: false
+    verify_ssl: false             # Set true (or a CA bundle path) in production
+    api_version: "14.0"
+    lookup: log_sources           # log_sources (recommended, one bulk call) | aql
+    log_source_cache_seconds: 300 # How long the log source list is reused
+    page_size: 500
+    # Used only when lookup: aql. Placeholders: {ip}, {device_name}
+    aql_template: "SELECT MAX(starttime) AS last_seen FROM events WHERE LOGSOURCENAME(logsourceid) = '{device_name}' LAST 3 DAYS"
+    search_poll_seconds: 2
+    search_timeout_seconds: 120
     # Credentials loaded from env: QRADAR_SEC_TOKEN
 
-  # FortiSIEM
+  # FortiSIEM (base_url must end in /phoenix/rest)
   fortisiem:
     base_url: "https://fortisiem.yourdomain.com/phoenix/rest"
-    # Credentials loaded from env: FORTISIEM_USER, FORTISIEM_PASS
+    verify_ssl: true
+    query_window_hours: 72        # How far back to look for the newest event
+    query_poll_seconds: 2
+    query_timeout_seconds: 120
+    # Credentials loaded from env: FORTISIEM_USER ("org/user" on multi-tenant), FORTISIEM_PASS
 
   # ── Add more SIEMs below as needed ────────────────────────────
   # splunk:

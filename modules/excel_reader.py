@@ -8,7 +8,8 @@ Reads device inventory from an Excel file (.xlsx).
 Expected columns:
     device_name     - Hostname or label for the device
     ip_address      - IP address of the device
-    siem_platform   - One of: seceon | qradar | fortisiem
+    siem_platform   - A platform registered in siem_clients/factory.py
+                      (seceon | qradar | fortisiem)
     client_name     - (Optional) Name of the client/tenant
     api_endpoint    - (Optional) Override API endpoint for this device
     auth_ref        - (Optional) Reference key to a specific credential set
@@ -21,12 +22,14 @@ from typing import List, Dict, Any
 
 import pandas as pd
 
+from .siem_clients.factory import SIEMClientFactory
+
 logger = logging.getLogger(__name__)
 
 REQUIRED_COLUMNS = {"device_name", "ip_address", "siem_platform"}
 OPTIONAL_COLUMNS = {"client_name", "api_endpoint", "auth_ref", "notes"}
 
-SUPPORTED_SIEMS = {"seceon", "qradar", "fortisiem"}
+SUPPORTED_SIEMS = set(SIEMClientFactory.list_supported())
 
 
 class ExcelReader:
