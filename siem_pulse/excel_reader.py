@@ -28,7 +28,8 @@ Expected columns:
 
 import logging
 from pathlib import Path
-from typing import List, Dict, Any
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import yaml
@@ -37,8 +38,34 @@ from .siem_clients.factory import SIEMClientFactory
 
 logger = logging.getLogger(__name__)
 
+
+def parse_datetime(value: str) -> Optional[datetime]:
+    """Parse '2026-10-25', '2026-10-25 08:00' or ISO 8601 into an aware UTC datetime."""
+    text = str(value).strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        try:
+            parsed = pd.to_datetime(text).to_pydatetime()
+        except (ValueError, TypeError):
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
 REQUIRED_COLUMNS = {"device_name", "ip_address", "siem_platform"}
-OPTIONAL_COLUMNS = {"client_name", "api_endpoint", "auth_ref", "notes"}
+OPTIONAL_COLUMNS = {
+    "client_name", "api_endpoint", "auth_ref", "notes",
+    # Alerting (Phase 3)
+    "threshold_hours",      # hours without logs before this device is stale
+    "criticality",          # critical | high | medium | low
+    "snooze_until",         # ISO date/time — no alerts until then
+    # Detection (Phase 4)
+    "device_type",          # e.g. firewall, domain_controller, edr — used for ATT&CK coverage
+    "expected_log_types",   # e.g. "traffic;system" — log types the device should send
+    "min_events_per_hour",  # optional absolute volume floor
+}
+CRITICALITY_LEVELS = ("critical", "high", "medium", "low")
 
 SUPPORTED_SIEMS = set(SIEMClientFactory.list_supported())
 
@@ -141,11 +168,12 @@ class ExcelReader:
             logger.warning(f"Row {row_num}: Skipping '{device_name}' — missing siem_platform.")
             return None
 
-        # Validate SIEM platform
-        if siem_platform not in SUPPORTED_SIEMS:
+        # Validate SIEM platform (read live so plugin connectors are included)
+        supported = set(SIEMClientFactory.list_supported())
+        if siem_platform not in supported:
             logger.warning(
                 f"Row {row_num}: Unknown SIEM platform '{siem_platform}' for device "
-                f"'{device_name}'. Supported: {SUPPORTED_SIEMS}. Skipping."
+                f"'{device_name}'. Supported: {sorted(supported)}. Skipping."
             )
             return None
 
@@ -158,6 +186,52 @@ class ExcelReader:
             "auth_ref": self._safe_get(row, "auth_ref"),
             "notes": self._safe_get(row, "notes"),
         }
+
+        # Optional columns, validated; a bad value is dropped with a warning
+        threshold = self._safe_get(row, "threshold_hours")
+        if threshold is not None:
+            try:
+                device["threshold_hours"] = float(threshold)
+                if device["threshold_hours"] <= 0:
+                    raise ValueError
+            except ValueError:
+                logger.warning(f"Row {row_num}: ignoring invalid threshold_hours '{threshold}'")
+                device.pop("threshold_hours", None)
+
+        criticality = (self._safe_get(row, "criticality") or "").lower()
+        if criticality:
+            if criticality in CRITICALITY_LEVELS:
+                device["criticality"] = criticality
+            else:
+                logger.warning(
+                    f"Row {row_num}: ignoring criticality '{criticality}' "
+                    f"(use {', '.join(CRITICALITY_LEVELS)})"
+                )
+
+        snooze = self._safe_get(row, "snooze_until")
+        if snooze:
+            parsed = parse_datetime(snooze)
+            if parsed:
+                device["snooze_until"] = parsed
+            else:
+                logger.warning(f"Row {row_num}: ignoring invalid snooze_until '{snooze}'")
+
+        min_eph = self._safe_get(row, "min_events_per_hour")
+        if min_eph is not None:
+            try:
+                device["min_events_per_hour"] = float(min_eph)
+            except ValueError:
+                logger.warning(f"Row {row_num}: ignoring invalid min_events_per_hour '{min_eph}'")
+
+        device_type = self._safe_get(row, "device_type")
+        if device_type:
+            device["device_type"] = device_type.lower().replace(" ", "_")
+
+        log_types = self._safe_get(row, "expected_log_types")
+        if log_types:
+            device["expected_log_types"] = [
+                t.strip().lower() for t in log_types.replace(",", ";").split(";") if t.strip()
+            ]
         return device
 
     @staticmethod

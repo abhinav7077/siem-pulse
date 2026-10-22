@@ -24,8 +24,10 @@ A device that stops logging is a blind spot: attacks on it go undetected. SIEM P
 - 🔌 Modular SIEM connectors (Seceon, QRadar, FortiSIEM)
 - 🕐 24-hour log staleness detection with configurable threshold
 - 📊 Console summary table + CSV report output
-- 📧 Email alerts (SMTP/TLS) for stale and error devices
-- 💬 Slack webhook alerts (optional)
+- 🔔 Alerts on **changes only**: new issue, still open (reminder), recovered — with run history in SQLite
+- 🎯 Per-device thresholds and criticality, snoozes and maintenance windows
+- 📬 Channels: email (HTML + text), Slack, Microsoft Teams, PagerDuty, Opsgenie, ServiceNow, Jira, generic webhook (SOAR)
+- 🧭 Routing per client / criticality, plus a daily digest
 - 🔄 Retry logic with exponential backoff
 - 🔐 Secure credential handling via environment variables
 - 📅 Scheduled execution (run every N minutes)
@@ -107,6 +109,12 @@ Edit `sample_devices.xlsx` (the `Devices` sheet), or use a `.csv` or `.yaml` fil
 | `api_endpoint` | Optional | SIEM API URL for this device's client (overrides `base_url`) |
 | `auth_ref` | Optional | Client/tenant key: picks `tenants:` overrides in config and prefixed credentials (see [Multi-client setups](#multi-client-setups)) |
 | `notes` | Optional | Free-text notes |
+| `criticality` | Optional | `critical` / `high` / `medium` / `low` — picks the threshold and can drive routing |
+| `threshold_hours` | Optional | Hours without logs before this device is stale (overrides everything else) |
+| `snooze_until` | Optional | No alerts for this device until this date/time |
+| `device_type` | Optional | e.g. `firewall`, `domain_controller`, `edr` — used for ATT&CK coverage |
+| `expected_log_types` | Optional | e.g. `traffic;system` — log types the device should send |
+| `min_events_per_hour` | Optional | Alert if volume falls below this |
 
 ### 5. Run the monitor
 
@@ -192,6 +200,46 @@ Every SIEM section in `config.yaml` accepts `verify_ssl: true | false | "/path/t
 - Bad credentials (401/403), other 4xx responses, invalid IP addresses and unexpected response formats fail immediately with a clear error — retrying would not help
 
 ---
+
+## Alerts that only fire on change
+
+Every run is stored in `siem_pulse.db` (SQLite, `state.path`). Alerts compare the new run with the last one:
+
+| Group | Meaning | Sent |
+|-------|---------|------|
+| 🆕 New | Device just became stale/error (or a snooze ended and it is still down) | Immediately |
+| 🔁 Reminder | Still down, already alerted | Every `repeat_after_hours` (default 24h) |
+| ✅ Recovered | Logs flowing again | Once |
+
+A device that stays down for a week produces one alert plus daily reminders, not 168 hourly alerts. An alert that could not be delivered anywhere is retried on the next run. Set `alerting.mode: every_run` for the old behaviour.
+
+**Thresholds:** a device's `threshold_hours` column wins; otherwise its `criticality` picks `logic.criticality_thresholds` (default critical 1h, high 4h, medium 24h, low 72h); otherwise `logic.threshold_hours`.
+
+**Snoozes and maintenance:**
+
+```bash
+siem-pulse --snooze "fw-01" --until 4h --reason "RMA"      # name or IP, * wildcards allowed
+siem-pulse --snooze "acme-*" --until 2026-11-01T08:00
+siem-pulse --list-snoozes
+siem-pulse --unsnooze "fw-01"
+```
+
+Weekly or one-off `maintenance_windows` in `config.yaml` match devices by client, SIEM, criticality, name or type. Suppressed devices are still checked and shown with 🔕, but not alerted.
+
+**Channels and routing:** define named `alerting.channels` and send each client or criticality to the right place with `alerting.routes` (examples in `config.yaml`):
+
+| Type | What it does | Secrets |
+|------|--------------|---------|
+| `email` | HTML + plain-text summary | `SMTP_PASSWORD` |
+| `slack` | Block Kit message, split to fit Slack limits | `SLACK_WEBHOOK_URL` |
+| `teams` | Adaptive Card to a Teams workflow / incoming webhook | `TEAMS_WEBHOOK_URL` |
+| `webhook` | JSON for SOAR (XSOAR, Splunk SOAR, Shuffle, n8n), optional HMAC signature | `url` / `hmac_secret` |
+| `pagerduty` | One incident per device, auto-resolved on recovery | `PAGERDUTY_ROUTING_KEY` |
+| `opsgenie` | One alert per device, closed on recovery | `OPSGENIE_API_KEY` |
+| `servicenow` | One incident per outage, work notes on reminders, resolved on recovery | `SERVICENOW_USER` / `SERVICENOW_PASS` |
+| `jira` | One issue per outage, comments, optional resolve transition | `JIRA_EMAIL` + `JIRA_API_TOKEN` |
+
+Ticket ids are stored, so re-runs never create duplicates. **Daily digest:** set `alerting.digest` or run `siem-pulse --digest`.
 
 ## Multi-client setups
 

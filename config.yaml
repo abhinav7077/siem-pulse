@@ -28,6 +28,13 @@ secrets:
 # Detection logic
 logic:
   threshold_hours: 24           # Flag device if no logs in this many hours
+  # Per-criticality thresholds (inventory column `criticality`). A device's own
+  # `threshold_hours` column wins over these; devices without either use threshold_hours.
+  criticality_thresholds:
+    critical: 1
+    high: 4
+    medium: 24
+    low: 72
 
 # ── Performance (for large inventories) ────────────────────────────────────
 performance:
@@ -124,6 +131,12 @@ siem:
 
 # ── Alerting ────────────────────────────────────────────────────────────────
 alerting:
+  mode: changes                 # changes: alert on new / recovered only | every_run: every issue, every run
+  repeat_after_hours: 24        # Re-send still-open issues this often (0 = never)
+  notify_recovered: true
+
+  # The `email` and `slack` blocks below are the simple setup: when enabled they
+  # become channels named "email" and "slack" and receive every alert.
   email:
     enabled: true
     smtp_server: "smtp.example.com"
@@ -135,11 +148,52 @@ alerting:
       - "analyst@example.com"
       - "soc-team@example.com"
     subject_prefix: "[SOC ALERT]"
+    # password_secret: SMTP_PASSWORD   # name of the secret holding the SMTP password
 
   slack:
     enabled: false
     # Webhook URL loaded from env: SLACK_WEBHOOK_URL
-    channel: "#soc-alerts"
+
+  # ── Advanced: named channels + routes ───────────────────────────────────
+  # channels:
+  #   acme_email: {type: email, smtp_server: smtp.example.com, sender: soc@example.com,
+  #                recipients: [acme-it@example.com]}
+  #   soc_teams:  {type: teams, webhook_secret: TEAMS_WEBHOOK_URL, default: true}
+  #   oncall:     {type: pagerduty, routing_key_secret: PAGERDUTY_ROUTING_KEY}
+  #   opsgenie:   {type: opsgenie, api_key_secret: OPSGENIE_API_KEY}
+  #   tickets:    {type: servicenow, instance_url: "https://acme.service-now.com", assignment_group: SOC}
+  #   jira:       {type: jira, base_url: "https://acme.atlassian.net", project_key: SOC,
+  #                resolve_transition_id: "31"}    # JIRA_EMAIL + JIRA_API_TOKEN
+  #   soar:       {type: webhook, url: "https://soar.example/hooks/siem-pulse", hmac_secret: SOAR_HMAC_KEY}
+  #
+  # default_channels: [email, soc_teams]    # devices that match no route
+  # routes:                                 # first match wins unless continue: true
+  #   - match: {criticality: critical}
+  #     channels: [oncall]
+  #     continue: true
+  #   - match: {client_name: "Acme Corp"}
+  #     channels: [acme_email, tickets]
+  #
+  # digest:                                 # daily summary of everything still open
+  #   enabled: true
+  #   time: "08:00"
+  #   timezone: "Europe/London"
+  #   channels: [email]
+
+# ── Maintenance windows (no alerts while active; devices still checked) ─────
+# maintenance_windows:
+#   - name: "Acme patch night"
+#     match: {client_name: "Acme Corp"}
+#     weekly: {days: [sat], start: "22:00", end: "04:00", timezone: "Europe/London"}
+#   - name: "DC migration"
+#     match: {device_name: "dc-*"}
+#     start: "2026-11-02T18:00:00Z"
+#     end: "2026-11-03T06:00:00Z"
+
+# ── Run history (state-aware alerts, digests, dashboard) ────────────────────
+state:
+  path: siem_pulse.db
+  keep_days: 90
 
 # ── Reports ─────────────────────────────────────────────────────────────────
 reporting:

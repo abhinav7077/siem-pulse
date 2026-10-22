@@ -38,7 +38,10 @@ import yaml
 from siem_pulse import __version__
 
 from siem_pulse.inventory_sources import load_inventory
-from siem_pulse.log_checker import LogChecker
+from siem_pulse.alert_policy import classify, digest_batch, digest_due
+from siem_pulse.log_checker import LogChecker, device_key
+from siem_pulse.state_store import StateStore, to_iso
+from siem_pulse.suppression import apply_suppression, matches, parse_until
 from siem_pulse.alerting import AlertManager
 from siem_pulse.reconciler import print_reconcile, reconcile, save_reconcile_csv
 from siem_pulse.report_generator import ReportGenerator
@@ -162,6 +165,10 @@ def check_one_device(
         )
         result = {
             **device,
+            "device_key": device_key(device),
+            "client_name": device.get("client_name") or "N/A",
+            "criticality": device.get("criticality") or "medium",
+            "threshold_hours": checker.threshold_for(device),
             "status": "error",
             "last_log_time": None,
             "hours_since_last_log": None,
@@ -285,6 +292,7 @@ def run_check(
     # ── Step 4: Set up checker ────────────────────────────────────────────────
     checker = LogChecker(
         threshold_hours=config.get("logic", {}).get("threshold_hours", 24),
+        criticality_thresholds=config.get("logic", {}).get("criticality_thresholds"),
         max_retries=config.get("siem", {}).get("max_retries", 3),
         retry_delay=config.get("siem", {}).get("retry_delay_seconds", 5),
         max_retry_after=config.get("siem", {}).get("max_retry_after_seconds", 300),
@@ -318,7 +326,17 @@ def run_check(
                 device = futures[future]
                 logger.error(f"Thread exception for {device.get('device_name')}: {e}")
 
-    # ── Step 6: Report ────────────────────────────────────────────────────────
+    # ── Step 6: History, suppression, detection ──────────────────────────────
+    scope = AlertManager._scope_label(filter_siem, filter_client)
+    store = StateStore.from_config(config)
+    run_id = store.start_run(scope)
+    previous = store.get_states(r["device_key"] for r in results)
+    suppressed = apply_suppression(results, config, store.active_snoozes())
+    if suppressed:
+        logger.info(f"{suppressed} device(s) suppressed (snooze / maintenance) — reported, not alerted")
+    run_post_check_hooks(results, config, store)
+
+    # ── Step 7: Report ────────────────────────────────────────────────────────
     reporter = ReportGenerator(config)
     report = reporter.generate(results)
     reporter.print_summary(
@@ -328,28 +346,88 @@ def run_check(
         report, filter_siem=filter_siem, filter_client=filter_client
     )
 
-    # ── Step 7: Alerts ────────────────────────────────────────────────────────
-    stale = [r for r in results if r["status"] == "stale"]
-    errors = [r for r in results if r["status"] == "error"]
-
-    if stale or errors:
-        alerter = AlertManager(config)
-        alerter.send_alert(
-            stale, errors,
-            filter_siem=filter_siem, filter_client=filter_client
-        )
-    else:
-        logger.info("All checked devices healthy — no alerts sent.")
+    # ── Step 8: Alerts on what changed ────────────────────────────────────────
+    batch = classify(results, previous, config, scope=scope)
+    store.update_states(results, previous)
+    alerter = AlertManager(config, store)
+    alerter.dispatch(batch)
+    maybe_send_digest(config, store, alerter, logger)
 
     # ── Timing ────────────────────────────────────────────────────────────────
     elapsed = (datetime.now() - run_start).total_seconds()
+    store.finish_run(run_id, results, elapsed)
     rate = len(devices) / elapsed if elapsed > 0 else 0
+    stale = sum(1 for r in results if r["status"] == "stale")
+    errors = sum(1 for r in results if r["status"] == "error")
     logger.info(
         f"Cycle done | {len(devices)} devices | "
         f"{elapsed:.1f}s | {rate:.1f} devices/sec | "
-        f"Stale: {len(stale)} | Errors: {len(errors)}"
+        f"Stale: {stale} | Errors: {errors} | Suppressed: {suppressed}"
     )
     logger.info("=" * 70)
+    run_after_run_hooks(config, store, results, elapsed)
+    store.close()
+    return {"run_id": run_id, "results": results, "batch": batch}
+
+
+# ─── Hooks filled in by later phases ─────────────────────────────────────────
+
+def run_post_check_hooks(results: List[Dict[str, Any]], config: dict, store: StateStore):
+    """Extra checks on the results before reporting (deeper detection)."""
+
+
+def run_after_run_hooks(config: dict, store: StateStore, results: List[Dict[str, Any]], elapsed: float):
+    """Things to do once a run is recorded (metrics export, heartbeat)."""
+
+
+# ─── Digest and snoozes ───────────────────────────────────────────────────────
+
+def maybe_send_digest(config: dict, store: StateStore, alerter: AlertManager, logger: logging.Logger,
+                      force: bool = False) -> bool:
+    if not force and not digest_due(config, store.get_meta("last_digest_at")):
+        return False
+    batch = digest_batch(store.open_issues())
+    if batch.is_empty():
+        logger.info("Digest: no open issues.")
+    else:
+        alerter.dispatch(batch)
+    store.set_meta("last_digest_at", to_iso(datetime.now(tz=timezone.utc)))
+    return True
+
+
+def find_devices(devices: List[Dict[str, Any]], pattern: str) -> List[Dict[str, Any]]:
+    """Devices whose name or IP matches `pattern` (glob, case-insensitive)."""
+    return [d for d in devices
+            if matches(d, {"device_name": pattern}) or matches(d, {"ip_address": pattern})]
+
+
+def run_snooze_command(args, config: dict, device_file: str, logger: logging.Logger):
+    store = StateStore.from_config(config)
+    try:
+        if args.list_snoozes:
+            snoozes = store.active_snoozes()
+            print(f"\n  {len(snoozes)} active snooze(s)")
+            for s in sorted(snoozes.values(), key=lambda x: x["until"]):
+                until = s["until"][:16].replace("T", " ")
+                print(f"    • {s['device_name']:<30} until {until} UTC  {s['reason'] or ''}")
+            print()
+            return
+        pattern = args.snooze or args.unsnooze
+        targets = find_devices(load_filtered_devices(config, device_file, logger, args.siem, args.client), pattern)
+        if not targets:
+            logger.error(f"No device in the inventory matches '{pattern}'")
+            sys.exit(1)
+        for d in targets:
+            key = device_key(d)
+            if args.snooze:
+                until = parse_until(args.until or "24h")
+                store.snooze(key, d["device_name"], until, args.reason or "")
+                print(f"  🔕 {d['device_name']} snoozed until {until.strftime('%Y-%m-%d %H:%M UTC')}")
+            else:
+                done = store.unsnooze(key)
+                print(f"  🔔 {d['device_name']} {'unsnoozed' if done else 'was not snoozed'}")
+    finally:
+        store.close()
 
 
 # ─── CLI ──────────────────────────────────────────────────────────────────────
@@ -384,6 +462,15 @@ def main():
     parser.add_argument("--list-clients", action="store_true",      help="List all clients in inventory and exit")
     parser.add_argument("--list-siems",   action="store_true",
                         help="List all SIEM platforms in inventory and exit")
+    parser.add_argument("--snooze",       metavar="DEVICE",
+                        help="Snooze alerts for a device (name or IP, * wildcards allowed)")
+    parser.add_argument("--until",        metavar="WHEN",
+                        help="With --snooze: 4h, 2d or 2026-10-25T08:00 (default 24h)")
+    parser.add_argument("--reason",       help="With --snooze: why (shown in reports)")
+    parser.add_argument("--unsnooze",     metavar="DEVICE", help="Remove a snooze")
+    parser.add_argument("--list-snoozes", action="store_true", help="Show active snoozes")
+    parser.add_argument("--digest",       action="store_true",
+                        help="Send the open-issues digest now (no SIEM calls)")
     parser.add_argument("--reconcile",    action="store_true",
                         help="Compare inventory with sources the SIEMs know, then exit")
 
@@ -426,6 +513,16 @@ def main():
                 ))
                 print(f"  {s.upper():<15} {count:>4} devices   Clients: {len(clients_on_siem)}")
             print()
+        return
+
+    # ── Snoozes and digest (no SIEM calls) ─────────────────────────────────────
+    if args.snooze or args.unsnooze or args.list_snoozes:
+        run_snooze_command(args, config, device_file, logger)
+        return
+    if args.digest:
+        store = StateStore.from_config(config)
+        maybe_send_digest(config, store, AlertManager(config, store), logger, force=True)
+        store.close()
         return
 
     # ── Reconciliation (report and exit) ───────────────────────────────────────

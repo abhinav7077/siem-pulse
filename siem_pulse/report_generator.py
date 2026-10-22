@@ -67,6 +67,7 @@ class ReportGenerator:
                 "healthy_count":  len(healthy),
                 "stale_count":    len(stale),
                 "error_count":    len(error),
+                "suppressed_count": sum(1 for r in results if r.get("suppressed") and r["status"] != "healthy"),
                 "generated_at":   datetime.now(tz=timezone.utc).strftime(
                     "%Y-%m-%d %H:%M:%S UTC"
                 ),
@@ -128,6 +129,10 @@ class ReportGenerator:
                 prev_client = client
 
             icon = self.STATUS_ICONS.get(r["status"], r["status"])
+            if r.get("suppressed") and r["status"] != "healthy":
+                icon = icon.rstrip() + " 🔕"
+            if r.get("findings"):
+                icon = icon.rstrip() + f" ⚠️ {len(r['findings'])}"
             last_log = str(r.get("last_log_time") or "N/A")
             if len(last_log) > col[4] - 1:
                 last_log = last_log[:col[4] - 1]
@@ -151,6 +156,7 @@ class ReportGenerator:
             f"✅ Healthy: {summary['healthy_count']:,} ({health_pct}%)  |  "
             f"❌ Stale: {summary['stale_count']:,}  |  "
             f"⚠️  Error: {summary['error_count']:,}"
+            + (f"  |  🔕 Suppressed: {summary['suppressed_count']:,}" if summary["suppressed_count"] else "")
         )
         print(f"{border}\n")
 
@@ -186,8 +192,8 @@ class ReportGenerator:
 
         fieldnames = [
             "device_name", "client_name", "siem_platform", "ip_address",
-            "status", "last_log_time", "hours_since_last_log",
-            "checked_at", "error", "notes",
+            "status", "criticality", "threshold_hours", "last_log_time", "hours_since_last_log",
+            "suppressed", "findings", "checked_at", "error", "notes",
         ]
 
         try:
@@ -200,7 +206,8 @@ class ReportGenerator:
                     sorted(report["error"],   key=lambda x: x.get("device_name", "")) +
                     sorted(report["healthy"], key=lambda x: x.get("device_name", ""))
                 )
-                writer.writerows(ordered)
+                for row in ordered:
+                    writer.writerow({**row, "findings": "; ".join(row.get("findings") or [])})
             logger.info(f"CSV report saved: {filename}")
             return filename
         except Exception as e:

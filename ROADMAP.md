@@ -106,18 +106,19 @@ Still needs confirming against real tenants.)*
 
 **Goal:** every alert is actionable; repeated or expected outages do not spam the team.
 
-- [ ] Store each run's results in SQLite (PostgreSQL optional)
-- [ ] State-aware alerts: **newly stale**, **still stale**, **recovered**
-- [ ] Alert only on state changes, plus a configurable daily digest
-- [ ] Per-device `threshold_hours` column (overrides the global 24h)
-- [ ] Per-device `criticality` (critical / high / medium / low) with different thresholds and channels
-- [ ] Maintenance windows and snooze (`snooze_until` column or CLI command)
-- [ ] Split Slack messages to stay under the 3,000-character block limit
-- [ ] Per-client alert routing (each client's team gets only their devices)
-- [ ] Plain-text email part alongside HTML
+- [x] Store each run's results in SQLite
+- [x] State-aware alerts: **newly stale**, **still stale**, **recovered**
+- [x] Alert only on state changes, plus a configurable daily digest
+- [x] Per-device `threshold_hours` column (overrides the global 24h)
+- [x] Per-device `criticality` (critical / high / medium / low) with different thresholds and channels
+- [x] Maintenance windows and snooze (`snooze_until` column or CLI command)
+- [x] Split Slack messages to stay under the 3,000-character block limit
+- [x] Per-client alert routing (each client's team gets only their devices)
+- [x] Plain-text email part alongside HTML
 
 **Exit check:** a device that stays down for a week produces one alert plus
-digest mentions, not 168 hourly alerts.
+digest mentions, not 168 hourly alerts. *(Covered by tests: new → quiet →
+reminder → recovered.)*
 
 ---
 
@@ -150,10 +151,10 @@ an alert within one run.
 - [ ] Plugin entry points so third-party connectors install with `pip`
 
 ### Alert channels and ticketing
-- [ ] Microsoft Teams webhook
-- [ ] PagerDuty and Opsgenie
-- [ ] ServiceNow and Jira ticket creation with de-duplication (one ticket per outage)
-- [ ] Generic webhook (JSON) for SOAR platforms (Cortex XSOAR, Splunk SOAR, Shuffle)
+- [x] Microsoft Teams webhook
+- [x] PagerDuty and Opsgenie
+- [x] ServiceNow and Jira ticket creation with de-duplication (one ticket per outage)
+- [x] Generic webhook (JSON) for SOAR platforms (Cortex XSOAR, Splunk SOAR, Shuffle)
 
 **Exit check:** at least six SIEMs and four alert channels supported, each with tests.
 
