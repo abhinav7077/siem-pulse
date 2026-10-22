@@ -58,7 +58,7 @@ time for every device.
 ### FortiSIEM
 - [x] Implement the real XML query flow: submit query → poll progress → fetch events
 - [x] Honour a `verify_ssl` setting (true / false / CA bundle path) for every SIEM instead of hardcoded `verify=False`
-- [ ] Optionally use CMDB device `lastEventTime` for a bulk lookup
+- [x] Bulk lookup via a grouped query (`lookup: grouped`)
 
 ### Seceon OTM
 - [x] Make the endpoint path, timestamp fields and auth header configurable (Seceon's API is documented per tenant)
@@ -84,17 +84,21 @@ manual run against one real tenant per SIEM *(needs access to real tenants)*.
 
 **Goal:** monitor 100+ client environments and 2,000+ devices accurately and fast.
 
-- [ ] Use the `api_endpoint` and `auth_ref` inventory columns (currently read but ignored)
-- [ ] Cache SIEM clients per `(platform, endpoint, auth_ref)` instead of per platform
-- [ ] Credential lookup per tenant (`<AUTH_REF>_API_KEY` env vars, then Vault / AWS Secrets Manager / Azure Key Vault)
-- [ ] **Bulk mode:** one "list all log sources + last seen" call per SIEM tenant, matched locally against the inventory (turns thousands of API calls into a handful)
-- [ ] **Inventory reconciliation:** report sources in the SIEM but not in Excel, and devices in Excel never seen by the SIEM
-- [ ] Per-SIEM rate limiting and concurrency limits
-- [ ] Optional inventory sources besides Excel: CSV, YAML, CMDB / ServiceNow API
-- [ ] Reuse HTTP sessions (`requests.Session`) for connection pooling
+- [x] Use the `api_endpoint` and `auth_ref` inventory columns
+- [x] Cache SIEM clients per `(platform, endpoint, auth_ref)` instead of per platform
+- [x] Credential lookup per tenant (`<AUTH_REF>_<VAR>` env vars, no fallback to default credentials)
+- [ ] Secrets manager backends: HashiCorp Vault, AWS Secrets Manager, Azure Key Vault
+- [x] **Bulk mode:** one "list all log sources + last seen" call per SIEM tenant, matched locally against the inventory (turns thousands of API calls into a handful)
+- [x] **Inventory reconciliation:** report sources in the SIEM but not in Excel, and devices in Excel never seen by the SIEM
+- [x] Per-SIEM rate limiting and concurrency limits
+- [x] Inventory files besides Excel: CSV and YAML
+- [ ] Inventory from a CMDB / ServiceNow API
+- [x] Reuse HTTP sessions (`requests.Session`) for connection pooling
 
 **Exit check:** a 2,000-device, 100-client run finishes in under 5 minutes with
-no cross-tenant credential use.
+no cross-tenant credential use. *(Passes in a simulated test: 100 tenants make
+100 bulk calls in total, and a tenant without its own credentials sends nothing.
+Still needs confirming against real tenants.)*
 
 ---
 

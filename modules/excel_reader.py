@@ -3,7 +3,17 @@
 """
 excel_reader.py
 ===============
-Reads device inventory from an Excel file (.xlsx).
+Reads the device inventory from an Excel (.xlsx/.xls), CSV or YAML file.
+The format is picked from the file extension.
+
+YAML files hold a list of devices, or a mapping with a `devices:` list:
+
+    devices:
+      - device_name: fw-01
+        ip_address: 10.0.0.1
+        siem_platform: qradar
+        client_name: Acme Corp
+        auth_ref: acme
 
 Expected columns:
     device_name     - Hostname or label for the device
@@ -21,6 +31,7 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 import pandas as pd
+import yaml
 
 from .siem_clients.factory import SIEMClientFactory
 
@@ -50,13 +61,9 @@ class ExcelReader:
         logger.info(f"Reading device inventory from: {self.file_path}")
 
         try:
-            df = pd.read_excel(
-                self.file_path,
-                sheet_name=self.sheet_name,
-                dtype=str,          # Read all as string to avoid type coercions
-            )
+            df = self._read_frame()
         except Exception as e:
-            raise ValueError(f"Failed to read Excel file '{self.file_path}': {e}")
+            raise ValueError(f"Failed to read inventory file '{self.file_path}': {e}")
 
         # Normalize column names: strip whitespace, lowercase
         df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
@@ -82,20 +89,41 @@ class ExcelReader:
         logger.info(f"Successfully loaded {len(devices)} valid devices.")
         return devices
 
+    def _read_frame(self) -> pd.DataFrame:
+        """Read the inventory into a DataFrame of strings (None for blanks)."""
+        suffix = self.file_path.suffix.lower()
+        if suffix in (".xlsx", ".xlsm", ".xls"):
+            # Read all as string to avoid type coercions
+            return pd.read_excel(self.file_path, sheet_name=self.sheet_name, dtype=str)
+        if suffix == ".csv":
+            return pd.read_csv(self.file_path, dtype=str, skipinitialspace=True)
+        if suffix in (".yaml", ".yml"):
+            with open(self.file_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or []
+            if isinstance(data, dict):
+                data = data.get("devices", [])
+            if not isinstance(data, list) or not all(isinstance(d, dict) for d in data):
+                raise ValueError("YAML inventory must be a list of devices or have a 'devices:' list")
+            records = [
+                {str(k): (None if v is None else str(v)) for k, v in d.items()} for d in data
+            ]
+            return pd.DataFrame(records, dtype=object)
+        raise ValueError(f"Unsupported inventory format '{suffix}' (use .xlsx, .csv or .yaml)")
+
     def _parse_row(self, row: pd.Series, row_num: int) -> Dict[str, Any] | None:
         """Parse a single row and validate it. Returns None if invalid."""
-        device_name = str(row.get("device_name", "")).strip()
-        ip_address = str(row.get("ip_address", "")).strip()
-        siem_platform = str(row.get("siem_platform", "")).strip().lower()
+        device_name = self._safe_get(row, "device_name") or ""
+        ip_address = self._safe_get(row, "ip_address") or ""
+        siem_platform = (self._safe_get(row, "siem_platform") or "").lower()
 
         # Skip rows with missing required fields
-        if not device_name or device_name == "nan":
+        if not device_name:
             logger.warning(f"Row {row_num}: Skipping — missing device_name.")
             return None
-        if not ip_address or ip_address == "nan":
+        if not ip_address:
             logger.warning(f"Row {row_num}: Skipping '{device_name}' — missing ip_address.")
             return None
-        if not siem_platform or siem_platform == "nan":
+        if not siem_platform:
             logger.warning(f"Row {row_num}: Skipping '{device_name}' — missing siem_platform.")
             return None
 
@@ -122,6 +150,9 @@ class ExcelReader:
     def _safe_get(row: pd.Series, col: str) -> str | None:
         """Return column value or None if missing/NaN."""
         val = row.get(col, None)
-        if val is None or str(val).strip().lower() == "nan":
+        if val is None or (isinstance(val, float) and pd.isna(val)):
             return None
-        return str(val).strip()
+        text = str(val).strip()
+        if not text or text.lower() in ("nan", "none"):
+            return None
+        return text

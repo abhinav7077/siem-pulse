@@ -16,10 +16,11 @@ Lookup modes (config: siem.qradar.lookup):
         Reads every log source once from
         GET /config/event_sources/log_source_management/log_sources
         and uses its `last_event_time`. One paged call covers all devices,
-        and the list is cached for `log_source_cache_seconds`.
+        and the list is cached for `inventory_cache_seconds`.
         A device matches a log source when its ip_address equals the log
         source `identifier`, or its device_name equals the log source
         `name` or `identifier` (case-insensitive).
+        The same list powers inventory reconciliation (--reconcile).
 
     aql
         Runs one Ariel search per device, waits for it to finish, then reads
@@ -30,9 +31,7 @@ Mock mode:
     Set `siem.mock_mode: true` in config.yaml to return simulated responses.
 """
 
-import os
 import random
-import threading
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -63,33 +62,25 @@ class QRadarClient(BaseSIEMClient):
     """Retrieves last log event time per device from the IBM QRadar REST API."""
 
     config_key = "qradar"
+    supports_inventory = True  # Log sources API works in both lookup modes
 
-    def __init__(self, config: dict):
-        super().__init__(config)
+    def __init__(self, config: dict, base_url: Optional[str] = None, auth_ref: Optional[str] = None):
+        super().__init__(config, base_url=base_url, auth_ref=auth_ref)
         cfg = self.platform_cfg
         self.base_url = cfg.get("base_url", "https://qradar.example.com/api").rstrip("/")
         self.api_version = str(cfg.get("api_version", "14.0"))
         self.lookup = str(cfg.get("lookup", "log_sources")).lower()
         self.page_size = int(cfg.get("page_size", 500))
-        self.cache_seconds = float(cfg.get("log_source_cache_seconds", 300))
+        if "log_source_cache_seconds" in cfg:  # Older name for inventory_cache_seconds
+            self.inventory_cache_seconds = float(cfg["log_source_cache_seconds"])
         self.aql_template = cfg.get("aql_template", DEFAULT_AQL_TEMPLATE)
         self.poll_interval = float(cfg.get("search_poll_seconds", 2))
         self.search_timeout = float(cfg.get("search_timeout_seconds", 120))
-        self.sec_token = os.environ.get("QRADAR_SEC_TOKEN", "")
+        self.sec_token = self.credential("QRADAR_SEC_TOKEN")
 
         if self.lookup not in ("log_sources", "aql"):
             raise ValueError(
                 f"siem.qradar.lookup must be 'log_sources' or 'aql', got {self.lookup!r}"
-            )
-
-        self._cache_lock = threading.Lock()
-        self._cache: Optional[List[Dict[str, Any]]] = None
-        self._cache_time = 0.0
-
-        if not self.sec_token and not self.mock_mode:
-            self.logger.warning(
-                "QRADAR_SEC_TOKEN environment variable is not set. "
-                "Requests will likely fail."
             )
 
     def _headers(self, extra: dict = None) -> dict:
@@ -111,43 +102,24 @@ class QRadarClient(BaseSIEMClient):
     # ─── Log source lookup ────────────────────────────────────────────────────
 
     def _last_seen_log_sources(self, device: Dict[str, Any]) -> Optional[datetime]:
-        ip = str(device.get("ip_address") or "").strip().lower()
-        name = str(device.get("device_name") or "").strip().lower()
+        return self.last_seen_from_inventory(device)
 
-        matches = []
-        for source in self._get_log_sources():
-            identifier = str(source.get("identifier") or "").strip().lower()
-            source_name = str(source.get("name") or "").strip().lower()
-            if (ip and identifier == ip) or (name and name in (identifier, source_name)):
-                matches.append(source)
-
-        if not matches:
-            self.logger.warning(
-                f"No QRadar log source matches {device.get('device_name')} "
-                f"({device.get('ip_address')})"
-            )
-            return None
-
-        times = [s.get("last_event_time") for s in matches]
-        times = [t for t in times if isinstance(t, (int, float)) and t > 0]
-        if not times:
-            return None  # Log source exists but has never received an event
-        return epoch_to_datetime(max(times))
-
-    def _get_log_sources(self) -> List[Dict[str, Any]]:
-        """Return all log sources, fetching at most once per cache window."""
-        with self._cache_lock:
-            fresh = time.monotonic() - self._cache_time < self.cache_seconds
-            if self._cache is None or not fresh:
-                self._cache = self._fetch_log_sources()
-                self._cache_time = time.monotonic()
-                self.logger.info(f"Loaded {len(self._cache)} QRadar log sources")
-            return self._cache
+    def _fetch_inventory(self) -> List[Dict[str, Any]]:
+        inventory = []
+        for source in self._fetch_log_sources():
+            last = source.get("last_event_time")
+            inventory.append({
+                "name": source.get("name") or "",
+                "identifier": source.get("identifier") or "",
+                "last_seen": epoch_to_datetime(last) if isinstance(last, (int, float)) and last > 0 else None,
+            })
+        return inventory
 
     def _fetch_log_sources(self) -> List[Dict[str, Any]]:
         url = f"{self.base_url}{LOG_SOURCES_PATH}"
         params = {"fields": "id,name,identifier,enabled,last_event_time"}
         sources: List[Dict[str, Any]] = []
+        seen_ids = set()
         start = 0
         while True:
             end = start + self.page_size - 1
@@ -158,10 +130,20 @@ class QRadarClient(BaseSIEMClient):
             page = self._json(response, "QRadar")
             if not isinstance(page, list):
                 raise NonRetryableError("QRadar log source response is not a list")
-            sources.extend(page)
+            # Stop if the server ignored the Range header and sent everything, or
+            # repeats a page we already have — otherwise this would loop forever.
+            ids = [s.get("id") for s in page if s.get("id") is not None]
+            repeated = bool(ids) and all(i in seen_ids for i in ids)
+            if not repeated:
+                sources.extend(s for s in page if s.get("id") is None or s.get("id") not in seen_ids)
+                seen_ids.update(ids)
 
             total = self._content_range_total(response.headers.get("Content-Range"))
-            if len(page) < self.page_size or (total is not None and len(sources) >= total):
+            if (
+                repeated
+                or len(page) != self.page_size
+                or (total is not None and len(sources) >= total)
+            ):
                 return sources
             start += self.page_size
 

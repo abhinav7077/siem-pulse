@@ -32,7 +32,18 @@ siem:
   timeout_seconds: 30
   mock_mode: true               # Set to false to use real SIEM APIs
 
-  # verify_ssl (every SIEM): true (default) | false | "/path/to/ca-bundle.pem"
+  # Settings every SIEM section (and every tenant) accepts:
+  #   verify_ssl: true (default) | false | "/path/to/ca-bundle.pem"
+  #   max_concurrent_requests: 0     # Max parallel API calls per tenant (0 = no limit)
+  #   requests_per_second: 0         # Max request rate per tenant (0 = no limit)
+  #   inventory_cache_seconds: 300   # How long a bulk source list is reused
+  #
+  # Multi-client setups — two inventory columns pick the tenant for each device:
+  #   api_endpoint  overrides base_url for that device's SIEM
+  #   auth_ref      selects overrides from `tenants:` below AND prefixed credentials:
+  #                 auth_ref "acme" -> ACME_QRADAR_SEC_TOKEN, ACME_SECEON_API_KEY,
+  #                 ACME_FORTISIEM_USER / ACME_FORTISIEM_PASS
+  #   A tenant never falls back to the default credentials.
 
   # Seceon aiSIEM / OTM — check your tenant's API docs for the exact path/fields
   seceon:
@@ -42,6 +53,11 @@ siem:
     timestamp_fields: ["last_event_time", "lastEventTime"]  # dots for nested: "data.last_seen"
     auth_header: "Authorization"
     auth_scheme: "Bearer"
+    lookup: per_device              # per_device | bulk (one call per tenant, enables --reconcile)
+    # bulk_path: "/devices"         # Used only when lookup: bulk
+    # bulk_items_field: "items"
+    # bulk_ip_field: "ip"
+    # bulk_name_field: "name"
     # Credentials loaded from env: SECEON_API_KEY
 
   # IBM QRadar
@@ -50,13 +66,21 @@ siem:
     verify_ssl: false             # Set true (or a CA bundle path) in production
     api_version: "14.0"
     lookup: log_sources           # log_sources (recommended, one bulk call) | aql
-    log_source_cache_seconds: 300 # How long the log source list is reused
+    inventory_cache_seconds: 300  # How long the log source list is reused
     page_size: 500
     # Used only when lookup: aql. Placeholders: {ip}, {device_name}
     aql_template: "SELECT MAX(starttime) AS last_seen FROM events WHERE LOGSOURCENAME(logsourceid) = '{device_name}' LAST 3 DAYS"
     search_poll_seconds: 2
     search_timeout_seconds: 120
+    max_concurrent_requests: 5
     # Credentials loaded from env: QRADAR_SEC_TOKEN
+    # tenants:                      # Per-client overrides, keyed by auth_ref
+    #   acme:
+    #     base_url: "https://qradar.acme.example/api"
+    #     verify_ssl: "/etc/ssl/acme-ca.pem"
+    #   globex:
+    #     base_url: "https://qradar.globex.example/api"
+    #     requests_per_second: 2
 
   # FortiSIEM (base_url must end in /phoenix/rest)
   fortisiem:
@@ -65,6 +89,8 @@ siem:
     query_window_hours: 72        # How far back to look for the newest event
     query_poll_seconds: 2
     query_timeout_seconds: 120
+    lookup: per_device            # per_device | grouped (one query per tenant, enables --reconcile)
+    page_size: 1000               # Rows per page when reading grouped results
     # Credentials loaded from env: FORTISIEM_USER ("org/user" on multi-tenant), FORTISIEM_PASS
 
   # ── Add more SIEMs below as needed ────────────────────────────

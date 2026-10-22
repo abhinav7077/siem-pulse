@@ -3,23 +3,38 @@
 """
 base_client.py
 ==============
-Abstract base class for all SIEM API clients, plus the shared error types
-and HTTP helper every client uses.
+Abstract base class for all SIEM API clients, plus the shared error types,
+HTTP helper, per-tenant settings and credentials, rate limiting and the
+bulk "known sources" cache every client can use.
 
 Error types tell LogChecker whether a failure is worth retrying:
     RetryableError     — timeouts, connection errors, HTTP 5xx
     RateLimitedError   — HTTP 429 (carries the server's Retry-After, if any)
     NonRetryableError  — bad credentials (401/403), bad request, bad input,
                          unexpected response format. Retrying will not help.
+
+Tenants (multi-client setups):
+    A client instance serves one (platform, api_endpoint, auth_ref) tenant.
+    - api_endpoint (inventory column) overrides the platform base_url.
+    - auth_ref (inventory column) selects:
+        * settings overrides from siem.<platform>.tenants.<auth_ref> in config
+        * credentials from env vars prefixed with the auth_ref, e.g.
+          auth_ref "acme" + QRADAR_SEC_TOKEN  ->  ACME_QRADAR_SEC_TOKEN
+      A tenant never falls back to the default (unprefixed) credentials, so one
+      client's credentials are never sent to another client's SIEM.
 """
 
 import ipaddress
 import logging
+import os
+import re
+import threading
+import time
 import warnings
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import requests
 from urllib3.exceptions import InsecureRequestWarning
@@ -83,24 +98,72 @@ def epoch_to_datetime(value: Union[int, float, str]) -> datetime:
     return datetime.fromtimestamp(number, tz=timezone.utc)
 
 
+def env_prefix(auth_ref: Optional[str]) -> str:
+    """'Acme Corp-1' -> 'ACME_CORP_1_' (empty string when no auth_ref)."""
+    if not auth_ref:
+        return ""
+    return re.sub(r"[^A-Z0-9]+", "_", str(auth_ref).upper()).strip("_") + "_"
+
+
+class RateLimiter:
+    """Thread-safe limiter: at most `rate` requests per second (0 = unlimited)."""
+
+    def __init__(self, rate: float):
+        self.interval = 1.0 / rate if rate and rate > 0 else 0.0
+        self._lock = threading.Lock()
+        self._next = 0.0
+
+    def wait(self):
+        if not self.interval:
+            return
+        with self._lock:
+            now = time.monotonic()
+            start = max(now, self._next)
+            self._next = start + self.interval
+        if start > now:
+            time.sleep(start - now)
+
+
 # ─── Base client ──────────────────────────────────────────────────────────────
 
 class BaseSIEMClient(ABC):
     """
     Base class for SIEM clients.
     All SIEM implementations must provide get_last_log_time().
+
+    Clients that can list every source the SIEM knows about in one go set
+    `supports_inventory = True` (when the configured mode allows it) and
+    implement `_fetch_inventory()`. That enables bulk per-device lookups and
+    inventory reconciliation.
     """
 
     #: Key under config["siem"] holding this client's settings.
     config_key: str = ""
 
-    def __init__(self, config: dict):
+    def __init__(
+        self,
+        config: dict,
+        base_url: Optional[str] = None,
+        auth_ref: Optional[str] = None,
+    ):
         self.config = config
-        self.logger = logging.getLogger(self.__class__.__name__)
+        self.auth_ref = auth_ref or None
+        self.logger = logging.getLogger(
+            self.__class__.__name__ + (f"[{self.auth_ref}]" if self.auth_ref else "")
+        )
         siem_cfg = config.get("siem", {})
         self.timeout = siem_cfg.get("timeout_seconds", 30)
         self.mock_mode = siem_cfg.get("mock_mode", True)
-        self.platform_cfg: Dict[str, Any] = siem_cfg.get(self.config_key, {}) or {}
+
+        # Platform settings, then tenant overrides, then the inventory endpoint
+        platform_cfg = dict(siem_cfg.get(self.config_key, {}) or {})
+        tenants = platform_cfg.pop("tenants", {}) or {}
+        if self.auth_ref:
+            tenant_cfg = tenants.get(self.auth_ref) or tenants.get(str(self.auth_ref).lower())
+            platform_cfg.update(tenant_cfg or {})
+        if base_url:
+            platform_cfg["base_url"] = base_url
+        self.platform_cfg: Dict[str, Any] = platform_cfg
 
         # verify_ssl: true (default) | false | "/path/to/ca-bundle.pem"
         self.verify_ssl: Union[bool, str] = self.platform_cfg.get("verify_ssl", True)
@@ -110,6 +173,50 @@ class BaseSIEMClient(ABC):
                 f"TLS certificate verification is DISABLED for {self.config_key}. "
                 "Set verify_ssl to true or a CA bundle path in production."
             )
+
+        # Concurrency and rate limits apply per tenant (per client instance)
+        max_concurrent = int(self.platform_cfg.get("max_concurrent_requests", 0) or 0)
+        self._semaphore = threading.BoundedSemaphore(max_concurrent) if max_concurrent > 0 else None
+        self._rate_limiter = RateLimiter(float(self.platform_cfg.get("requests_per_second", 0) or 0))
+        self._sessions = threading.local()
+
+        # Bulk inventory cache
+        self.inventory_cache_seconds = float(self.platform_cfg.get("inventory_cache_seconds", 300))
+        self._inventory_lock = threading.Lock()
+        self._inventory: Optional[List[Dict[str, Any]]] = None
+        self._inventory_time = 0.0
+        self._inventory_error: Optional[NonRetryableError] = None
+
+        self._missing_credentials: List[str] = []
+
+    @property
+    def tenant_label(self) -> str:
+        return f"{self.config_key}" + (f" [{self.auth_ref}]" if self.auth_ref else "")
+
+    # ─── Credentials ──────────────────────────────────────────────────────────
+
+    def credential(self, name: str) -> str:
+        """
+        Read a credential from the environment.
+        With an auth_ref, only the prefixed variable is used (no fallback).
+        Missing values are remembered and reported when a request is made.
+        """
+        var = env_prefix(self.auth_ref) + name
+        value = os.environ.get(var, "")
+        if not value and not self.mock_mode:
+            self._missing_credentials.append(var)
+            self.logger.warning(f"{var} environment variable is not set.")
+        return value
+
+    def _require_credentials(self):
+        """Refuse to call a tenant's API without that tenant's credentials."""
+        if self.auth_ref and self._missing_credentials:
+            raise NonRetryableError(
+                f"Missing credentials for auth_ref '{self.auth_ref}': "
+                f"set {', '.join(self._missing_credentials)}"
+            )
+
+    # ─── Device lookup ────────────────────────────────────────────────────────
 
     @abstractmethod
     def get_last_log_time(self, device: Dict[str, Any]) -> Optional[datetime]:
@@ -129,6 +236,75 @@ class BaseSIEMClient(ABC):
             RetryableError / RateLimitedError / NonRetryableError
         """
 
+    # ─── Bulk inventory ───────────────────────────────────────────────────────
+
+    supports_inventory: bool = False
+
+    def _fetch_inventory(self) -> List[Dict[str, Any]]:
+        """
+        Return every source the SIEM knows, as dicts with:
+            name (str), identifier (str), last_seen (datetime | None)
+        Override in clients that support it.
+        """
+        raise NotImplementedError
+
+    def list_known_sources(self) -> List[Dict[str, Any]]:
+        """All sources the SIEM knows about, fetched at most once per cache window."""
+        if not self.supports_inventory:
+            raise NonRetryableError(f"{self.tenant_label} does not support listing sources")
+        with self._inventory_lock:
+            fresh = time.monotonic() - self._inventory_time < self.inventory_cache_seconds
+            if fresh and self._inventory_error is not None:
+                # A permanent failure (e.g. bad token) is not retried per device
+                raise self._inventory_error
+            if self._inventory is None or not fresh:
+                try:
+                    inventory = self._mock_inventory() if self.mock_mode else self._fetch_inventory()
+                except NonRetryableError as e:
+                    self._inventory, self._inventory_error = None, e
+                    self._inventory_time = time.monotonic()
+                    raise
+                self._inventory, self._inventory_error = inventory, None
+                self._inventory_time = time.monotonic()
+                self.logger.info(f"Loaded {len(inventory)} sources from {self.tenant_label}")
+            return self._inventory
+
+    def _mock_inventory(self) -> List[Dict[str, Any]]:
+        """Demo data for mock mode: two sources that are not in any inventory."""
+        now = datetime.now(tz=timezone.utc)
+        tag = env_prefix(self.auth_ref).lower().strip("_") or "default"
+        return [
+            {"name": f"unlisted-{self.config_key}-{tag}-{i}",
+             "identifier": f"192.0.2.{i}", "last_seen": now}
+            for i in (1, 2)
+        ]
+
+    @staticmethod
+    def source_matches(device: Dict[str, Any], source: Dict[str, Any]) -> bool:
+        """
+        A device matches a source when its IP equals the source identifier,
+        or its name equals the source name or identifier (case-insensitive).
+        """
+        ip = str(device.get("ip_address") or "").strip().lower()
+        name = str(device.get("device_name") or "").strip().lower()
+        identifier = str(source.get("identifier") or "").strip().lower()
+        source_name = str(source.get("name") or "").strip().lower()
+        return bool((ip and identifier == ip) or (name and name in (identifier, source_name)))
+
+    def last_seen_from_inventory(self, device: Dict[str, Any]) -> Optional[datetime]:
+        """Look a device up in the bulk inventory; newest time across all matches."""
+        matches = [s for s in self.list_known_sources() if self.source_matches(device, s)]
+        if not matches:
+            self.logger.warning(
+                f"No {self.tenant_label} source matches {device.get('device_name')} "
+                f"({device.get('ip_address')})"
+            )
+            return None
+        times = [s["last_seen"] for s in matches if s.get("last_seen")]
+        return max(times) if times else None
+
+    # ─── HTTP ─────────────────────────────────────────────────────────────────
+
     def _build_headers(self, extra: dict = None) -> dict:
         """Build common HTTP headers."""
         headers = {
@@ -139,17 +315,29 @@ class BaseSIEMClient(ABC):
             headers.update(extra)
         return headers
 
+    def _session(self) -> requests.Session:
+        """One pooled HTTP session per thread (requests.Session is not thread-safe)."""
+        session = getattr(self._sessions, "session", None)
+        if session is None:
+            session = requests.Session()
+            self._sessions.session = session
+        return session
+
     def _request(self, method: str, url: str, **kwargs) -> requests.Response:
         """
         Send an HTTP request and translate failures into SIEM error types.
         Returns the response only for 2xx status codes.
         """
+        self._require_credentials()
         kwargs.setdefault("timeout", self.timeout)
         kwargs.setdefault("verify", self.verify_ssl)
-        name = self.config_key or self.__class__.__name__
+        name = self.tenant_label
 
+        self._rate_limiter.wait()
+        if self._semaphore:
+            self._semaphore.acquire()
         try:
-            response = requests.request(method, url, **kwargs)
+            response = self._session().request(method, url, **kwargs)
         except requests.exceptions.Timeout as e:
             raise RetryableError(f"{name} request timed out: {url}") from e
         except requests.exceptions.SSLError as e:
@@ -158,6 +346,9 @@ class BaseSIEMClient(ABC):
             raise RetryableError(f"Cannot connect to {name} at {url}") from e
         except requests.exceptions.RequestException as e:
             raise RetryableError(f"{name} request failed: {e}") from e
+        finally:
+            if self._semaphore:
+                self._semaphore.release()
 
         status = response.status_code
         if 200 <= status < 300:

@@ -36,7 +36,7 @@ def test_429_carries_retry_after(http, config):
 def test_timeout_is_retryable(monkeypatch, config):
     def boom(*a, **k):
         raise requests.exceptions.Timeout()
-    monkeypatch.setattr(requests, "request", boom)
+    monkeypatch.setattr(requests.Session, "request", boom)
     with pytest.raises(RetryableError):
         QRadarClient(config)._request("GET", "https://qradar.test/api/x")
 

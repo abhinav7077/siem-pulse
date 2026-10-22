@@ -58,7 +58,10 @@ class FakeHTTP:
 @pytest.fixture
 def http(monkeypatch):
     fake = FakeHTTP()
-    monkeypatch.setattr(base_client.requests, "request", fake)
+    monkeypatch.setattr(
+        base_client.requests.Session, "request",
+        lambda self, method, url, **kwargs: fake(method, url, **kwargs),
+    )
     return fake
 
 

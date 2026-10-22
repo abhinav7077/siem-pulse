@@ -16,7 +16,11 @@ A device that stops logging is a blind spot: attacks on it go undetected. SIEM P
 
 ## Features
 
-- 📋 Reads device inventory from Excel (`.xlsx`)
+- 📋 Reads device inventory from Excel (`.xlsx`), CSV or YAML
+- 🏢 Multi-tenant: per-client SIEM endpoints and credentials, never shared across clients
+- ⚡ Bulk lookups: one API call per SIEM tenant instead of one per device
+- 🔎 Inventory reconciliation: finds unmonitored log sources and devices the SIEM has never seen
+- 🚦 Per-tenant rate and concurrency limits
 - 🔌 Modular SIEM connectors (Seceon, QRadar, FortiSIEM)
 - 🕐 24-hour log staleness detection with configurable threshold
 - 📊 Console summary table + CSV report output
@@ -45,6 +49,7 @@ siem-pulse/
     ├── log_checker.py             # Checks last log time per device
     ├── report_generator.py        # Generates console + CSV reports
     ├── alerting.py                # Email + Slack alerts
+    ├── reconciler.py              # Inventory vs. SIEM source comparison
     └── siem_clients/
         ├── base_client.py         # Abstract base for all SIEM clients
         ├── factory.py             # Instantiates the right client per device
@@ -97,7 +102,7 @@ export $(cat .env | xargs)
 
 ### 4. Populate your device inventory
 
-Edit `sample_devices.xlsx` — the `Devices` sheet must contain:
+Edit `sample_devices.xlsx` (the `Devices` sheet), or use a `.csv` or `.yaml` file with the same columns:
 
 | Column | Required | Description |
 |--------|----------|-------------|
@@ -105,8 +110,8 @@ Edit `sample_devices.xlsx` — the `Devices` sheet must contain:
 | `ip_address` | ✅ | Device IP address |
 | `siem_platform` | ✅ | `seceon` / `qradar` / `fortisiem` |
 | `client_name` | Optional | Client/tenant name |
-| `api_endpoint` | Optional | Override API endpoint |
-| `auth_ref` | Optional | Reference to alternate credential |
+| `api_endpoint` | Optional | SIEM API URL for this device's client (overrides `base_url`) |
+| `auth_ref` | Optional | Client/tenant key: picks `tenants:` overrides in config and prefixed credentials (see [Multi-client setups](#multi-client-setups)) |
 | `notes` | Optional | Free-text notes |
 
 ### 5. Run the monitor
@@ -121,8 +126,11 @@ python main.py
 # Run on a schedule (every 60 minutes by default)
 python main.py --schedule
 
-# Use a custom device file
+# Use a custom device file (.xlsx, .csv or .yaml)
 python main.py --device-file /path/to/my_devices.xlsx
+
+# Compare the inventory with what the SIEMs know (unmonitored / unknown devices)
+python main.py --reconcile
 
 # Use a different config
 python main.py --config /path/to/my_config.yaml
@@ -191,17 +199,61 @@ Every SIEM section in `config.yaml` accepts `verify_ssl: true | false | "/path/t
 
 ---
 
+## Multi-client setups
+
+For MSSPs and SOCs with many clients, each device row can point to its own SIEM tenant:
+
+| Inventory column | Effect |
+|------------------|--------|
+| `api_endpoint` | Overrides that platform's `base_url` for this device |
+| `auth_ref` | Loads overrides from `siem.<platform>.tenants.<auth_ref>` in `config.yaml`, and credentials from env vars prefixed with the auth_ref |
+
+Credential naming: auth_ref `acme` reads `ACME_QRADAR_SEC_TOKEN`, `ACME_SECEON_API_KEY`, `ACME_FORTISIEM_USER` and `ACME_FORTISIEM_PASS`. Non-alphanumeric characters become `_`, so `Acme Corp-1` becomes `ACME_CORP_1_`.
+
+**A tenant never falls back to the default credentials.** If `ACME_QRADAR_SEC_TOKEN` is missing, that tenant's devices are reported as errors and no request is sent, so one client's token is never sent to another client's SIEM.
+
+One client object is kept per tenant (platform + api_endpoint + auth_ref). Each tenant has its own HTTP connections, bulk cache and limits:
+
+```yaml
+siem:
+  qradar:
+    max_concurrent_requests: 5   # parallel calls per tenant
+    requests_per_second: 0       # 0 = unlimited
+    tenants:
+      acme:
+        base_url: "https://qradar.acme.example/api"
+        verify_ssl: "/etc/ssl/acme-ca.pem"
+```
+
+## Bulk lookups and reconciliation
+
+| SIEM | Bulk mode | How |
+|------|-----------|-----|
+| QRadar | `lookup: log_sources` (default) | One paged log source list per tenant |
+| FortiSIEM | `lookup: grouped` | One query per tenant grouped by reporting device, `MAX(phRecvTime)` |
+| Seceon | `lookup: bulk` | One call to `bulk_path`, fields set by `bulk_items_field` / `bulk_ip_field` / `bulk_name_field` |
+
+In bulk mode a 2,000-device run makes a handful of API calls instead of thousands. Bulk mode also enables `python main.py --reconcile`, which lists:
+
+- **Unlisted sources:** the SIEM receives logs from them but they are not in your inventory, so nobody would notice if they went quiet
+- **Not found:** inventory devices the SIEM has no source for (typos, wrong tenant, never onboarded)
+
+The report prints to the console and is saved as `reports/soc_log_report_reconcile_<timestamp>.csv`.
+
+---
+
 ## Adding a New SIEM Platform
 
 1. Create `modules/siem_clients/my_siem_client.py` inheriting `BaseSIEMClient`
-2. Implement `get_last_log_time(device) -> Optional[datetime]`
-3. Register it in `modules/siem_clients/factory.py`:
+2. Implement `get_last_log_time(device) -> Optional[datetime]`. Use `self._request()` for HTTP (it handles retries, TLS, rate limits) and `self.credential("MYSIEM_TOKEN")` for secrets (it handles `auth_ref` prefixes)
+3. Optional: set `supports_inventory = True` and implement `_fetch_inventory()` to get bulk lookups and `--reconcile`
+4. Register it in `modules/siem_clients/factory.py`:
    ```python
    from .my_siem_client import MySIEMClient
    SIEM_REGISTRY["mysiem"] = MySIEMClient
    ```
-4. Add config section under `siem:` in `config.yaml`
-5. Add devices with `siem_platform: mysiem` to your Excel file
+5. Add config section under `siem:` in `config.yaml`
+6. Add devices with `siem_platform: mysiem` to your inventory
 
 ---
 
@@ -275,6 +327,7 @@ Tests use a fake HTTP layer, so they never contact a real SIEM. CI runs them on 
 | `SECEON_API_KEY not set` | Load your `.env` file before running |
 | All devices show ERROR | Ensure `mock_mode: true` in config or verify SIEM connectivity |
 | `authentication/authorisation failed (HTTP 401)` | Token or password is wrong or lacks API permission — not retried |
+| `Missing credentials for auth_ref 'x'` | Set the prefixed env var shown in the message (e.g. `X_QRADAR_SEC_TOKEN`) |
 | QRadar device shows `Never / Not Found` | No log source identifier/name matches the device's IP or name — check the log source in QRadar |
 | Email not sending | Check `SMTP_PASSWORD`, SMTP server, and port 587 access |
 | `Unknown SIEM platform` | Ensure `siem_platform` column in Excel uses lowercase: `seceon`, `qradar`, `fortisiem` |

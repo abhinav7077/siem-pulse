@@ -20,6 +20,7 @@ Usage examples:
   python main.py --list-clients                         # Show all clients in Excel
   python main.py --list-siems                           # Show all SIEMs in Excel
   python main.py --dry-run                              # Show what would run, no API calls
+  python main.py --reconcile                            # Compare inventory with SIEM sources
 """
 
 import argparse
@@ -37,6 +38,7 @@ import yaml
 from modules.excel_reader import ExcelReader
 from modules.log_checker import LogChecker
 from modules.alerting import AlertManager
+from modules.reconciler import print_reconcile, reconcile, save_reconcile_csv
 from modules.report_generator import ReportGenerator
 from modules.siem_clients.factory import SIEMClientFactory
 
@@ -130,7 +132,7 @@ def check_one_device(
     """Called per thread. Checks one device and returns its result dict."""
     siem_name = device.get("siem_platform", "").lower()
     try:
-        client = SIEMClientFactory.get_client(siem_name, config)
+        client = SIEMClientFactory.get_client_for_device(device, config)
         result = checker.check_device(device, client)
     except Exception as e:
         logger.error(
@@ -149,6 +151,55 @@ def check_one_device(
         progress.increment()
 
     return result
+
+
+# ─── Inventory ────────────────────────────────────────────────────────────────
+
+def load_filtered_devices(
+    config: dict,
+    device_file: str,
+    logger: logging.Logger,
+    filter_siem: Optional[str] = None,
+    filter_client: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Load the inventory and apply the optional --siem / --client filters."""
+    reader = ExcelReader(device_file, sheet_name=sheet_name(config))
+    devices = reader.load_devices()
+    logger.info(f"Inventory total : {len(devices)} devices")
+
+    if filter_siem:
+        devices = [d for d in devices if d["siem_platform"] == filter_siem.lower()]
+        logger.info(f"After SIEM filter  [{filter_siem.upper()}]     : {len(devices)} devices")
+
+    if filter_client:
+        devices = [
+            d for d in devices
+            if (d.get("client_name") or "").strip().lower() == filter_client.strip().lower()
+        ]
+        logger.info(f"After client filter [{filter_client}] : {len(devices)} devices")
+    return devices
+
+
+def run_reconcile(
+    config: dict,
+    device_file: str,
+    logger: logging.Logger,
+    filter_siem: Optional[str] = None,
+    filter_client: Optional[str] = None,
+):
+    """Compare the inventory with the sources each SIEM tenant knows about."""
+    devices = load_filtered_devices(config, device_file, logger, filter_siem, filter_client)
+    if not devices:
+        logger.warning("No devices match the given filters. Nothing to reconcile.")
+        return
+    if filter_client:
+        logger.warning(
+            "Reconciling with --client: if this client shares a SIEM tenant with other "
+            "clients, their devices will be reported as 'unlisted'."
+        )
+    result = reconcile(devices, config)
+    print_reconcile(result)
+    save_reconcile_csv(result, config)
 
 
 # ─── Core Run ─────────────────────────────────────────────────────────────────
@@ -184,25 +235,8 @@ def run_check(
     logger.info(f"  Dry run  : {dry_run}")
     logger.info("=" * 70)
 
-    # ── Step 1: Load inventory ────────────────────────────────────────────────
-    reader = ExcelReader(device_file, sheet_name=sheet_name(config))
-    all_devices = reader.load_devices()
-    logger.info(f"Inventory total : {len(all_devices)} devices")
-
-    # ── Step 2: Apply filters ─────────────────────────────────────────────────
-    devices = all_devices
-
-    if filter_siem:
-        devices = [d for d in devices if d["siem_platform"] == filter_siem.lower()]
-        logger.info(f"After SIEM filter  [{filter_siem.upper()}]     : {len(devices)} devices")
-
-    if filter_client:
-        devices = [
-            d for d in devices
-            if (d.get("client_name") or "").strip().lower() == filter_client.strip().lower()
-        ]
-        logger.info(f"After client filter [{filter_client}] : {len(devices)} devices")
-
+    # ── Steps 1–2: Load inventory and apply filters ───────────────────────────
+    devices = load_filtered_devices(config, device_file, logger, filter_siem, filter_client)
     if not devices:
         logger.warning("No devices match the given filters. Nothing to do.")
         return
@@ -312,6 +346,7 @@ def main():
             "  python main.py --siem seceon --client \"Acme\"   # Combined filter\n"
             "  python main.py --list-clients                  # Show all clients\n"
             "  python main.py --dry-run --siem fortisiem      # Preview only\n"
+            "  python main.py --reconcile                     # Unmonitored / unknown devices\n"
         ),
     )
 
@@ -324,6 +359,7 @@ def main():
     parser.add_argument("--dry-run",      action="store_true",      help="Preview devices without API calls")
     parser.add_argument("--list-clients", action="store_true",      help="List all clients in inventory and exit")
     parser.add_argument("--list-siems",   action="store_true",      help="List all SIEM platforms in inventory and exit")
+    parser.add_argument("--reconcile",    action="store_true",      help="Compare inventory with sources the SIEMs know, then exit")
 
     args = parser.parse_args()
     config = load_config(args.config)
@@ -364,6 +400,11 @@ def main():
                 ))
                 print(f"  {s.upper():<15} {count:>4} devices   Clients: {len(clients_on_siem)}")
             print()
+        return
+
+    # ── Reconciliation (report and exit) ───────────────────────────────────────
+    if args.reconcile:
+        run_reconcile(config, device_file, logger, args.siem, args.client)
         return
 
     # ── Build run kwargs ───────────────────────────────────────────────────────
