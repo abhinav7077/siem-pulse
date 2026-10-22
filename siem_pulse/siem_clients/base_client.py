@@ -216,6 +216,7 @@ class BaseSIEMClient(ABC):
         self._inventory: Optional[List[Dict[str, Any]]] = None
         self._inventory_time = 0.0
         self._inventory_error: Optional[NonRetryableError] = None
+        self._metrics_lock = threading.Lock()
 
         self._missing_credentials: List[str] = []
 
@@ -360,6 +361,66 @@ class BaseSIEMClient(ABC):
         times = [s["last_seen"] for s in matches if s.get("last_seen")]
         return max(times) if times else None
 
+    # ─── Source metrics (Phase 4: volume, log types, parsing, clock skew) ─────
+
+    supports_metrics: bool = False
+
+    def _fetch_metrics(self, window_hours: float) -> List[Dict[str, Any]]:
+        """
+        Return per-source activity over the last `window_hours`, as dicts with:
+            name, identifier            used to match devices (like the inventory)
+            events (int)                events received in the window
+            log_types (list of str)     categories / sourcetypes / tables seen
+            unparsed (int, optional)    events the SIEM could not parse
+            max_skew_seconds (optional) worst gap between event time and receive time
+        Override in clients that support it.
+        """
+        raise NotImplementedError
+
+    def list_source_metrics(self, window_hours: float) -> List[Dict[str, Any]]:
+        # Separate lock: _fetch_metrics may itself call list_known_sources()
+        with self._metrics_lock:
+            cached = getattr(self, "_metrics_cache", None)
+            fresh = cached and time.monotonic() - cached[0] < self.inventory_cache_seconds and cached[1] == window_hours
+            if not fresh:
+                self._metrics_cache = (time.monotonic(), window_hours, self._fetch_metrics(window_hours))
+                self.logger.info(f"Loaded metrics for {len(self._metrics_cache[2])} sources from {self.tenant_label}")
+            return self._metrics_cache[2]
+
+    def metrics_for_device(self, device: Dict[str, Any], window_hours: float) -> Optional[Dict[str, Any]]:
+        """Combined metrics of every source matching the device; None if unsupported or unmatched."""
+        if self.mock_mode:
+            return self._mock_metrics(device, window_hours)
+        if not self.supports_metrics:
+            return None
+        matches = [m for m in self.list_source_metrics(window_hours) if self.source_matches(device, m)]
+        if not matches:
+            return {"events": 0, "log_types": [], "unparsed": 0, "max_skew_seconds": None,
+                    "window_hours": window_hours}
+        skews = [m["max_skew_seconds"] for m in matches if m.get("max_skew_seconds") is not None]
+        return {
+            "events": sum(int(m.get("events") or 0) for m in matches),
+            "log_types": sorted({str(t) for m in matches for t in (m.get("log_types") or [])}),
+            "unparsed": sum(int(m.get("unparsed") or 0) for m in matches),
+            "max_skew_seconds": max(skews) if skews else None,
+            "window_hours": window_hours,
+        }
+
+    def _mock_metrics(self, device: Dict[str, Any], window_hours: float) -> Dict[str, Any]:
+        rng = self._mock_rng(device)
+        expected = list(device.get("expected_log_types") or ["system"])
+        types = expected if rng.random() > 0.1 else expected[:-1]
+        events = int(rng.uniform(500, 5000) * window_hours)
+        if rng.random() < 0.08:
+            events = int(events * 0.05)         # simulated volume drop
+        return {
+            "events": events,
+            "log_types": types,
+            "unparsed": int(events * (0.4 if rng.random() < 0.05 else rng.uniform(0, 0.02))),
+            "max_skew_seconds": rng.uniform(0, 60) if rng.random() > 0.05 else rng.uniform(1800, 7200),
+            "window_hours": window_hours,
+        }
+
     # ─── HTTP ─────────────────────────────────────────────────────────────────
 
     def _build_headers(self, extra: dict = None) -> dict:
@@ -452,7 +513,7 @@ class InventoryClient(BaseSIEMClient):
         now = datetime.now(tz=timezone.utc)
         rng = self._mock_rng(device)
         if rng.random() < 0.70:
-            return now - timedelta(hours=rng.uniform(0.2, 20))
+            return now - timedelta(hours=rng.uniform(0.02, 0.9))
         return now - timedelta(hours=rng.uniform(25, 90))
 
     def _window_hours(self) -> float:

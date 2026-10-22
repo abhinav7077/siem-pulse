@@ -119,6 +119,8 @@ def detail(item: Dict[str, Any], group: str) -> str:
         return f"logs flowing again (last log {item.get('last_log_time') or 'now'})"
     if item.get("status") == "error":
         text = f"error: {item.get('error') or 'unknown'}"
+    elif item.get("status") == "degraded":
+        text = "logs arriving but " + "; ".join(item.get("findings") or ["quality checks failed"])
     else:
         age = _age(item)
         limit = item.get("threshold_hours")
@@ -128,8 +130,9 @@ def detail(item: Dict[str, Any], group: str) -> str:
             text += f" ({age}{limit_text})".replace("(, ", "(")
     if item.get("suppressed"):
         text += f" — 🔕 {item['suppressed']}"
-    for finding in item.get("findings") or []:
-        text += f" — ⚠️ {finding}"
+    if item.get("status") != "degraded":
+        for finding in item.get("findings") or []:
+            text += f" — ⚠️ {finding}"
     return text
 
 

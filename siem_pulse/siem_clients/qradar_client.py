@@ -48,6 +48,11 @@ DEFAULT_AQL_TEMPLATE = (
     "SELECT MAX(starttime) AS last_seen FROM events "
     "WHERE LOGSOURCENAME(logsourceid) = '{device_name}' LAST 3 DAYS"
 )
+METRICS_AQL = (
+    "SELECT logsourceid, CATEGORYNAME(highlevelcategory) AS log_type, isunparsed, "
+    "COUNT(*) AS events, MAX(starttime - devicetime) AS max_lag, MIN(starttime - devicetime) AS min_lag "
+    "FROM events GROUP BY logsourceid, highlevelcategory, isunparsed LAST {minutes} MINUTES"
+)
 ARIEL_DONE = "COMPLETED"
 ARIEL_FAILED = {"CANCELED", "ERROR"}
 
@@ -108,6 +113,7 @@ class QRadarClient(BaseSIEMClient):
         for source in self._fetch_log_sources():
             last = source.get("last_event_time")
             inventory.append({
+                "id": source.get("id"),
                 "name": source.get("name") or "",
                 "identifier": source.get("identifier") or "",
                 "last_seen": epoch_to_datetime(last) if isinstance(last, (int, float)) and last > 0 else None,
@@ -164,28 +170,65 @@ class QRadarClient(BaseSIEMClient):
             ip=ip, device_name=_aql_quote(device.get("device_name", ""))
         )
 
+        events = self._run_aql(aql, ip)
+        last_seen = events[0].get("last_seen") if events else None
+        if not last_seen:
+            return None
+        return epoch_to_datetime(last_seen)
+
+    def _run_aql(self, aql: str, label: str = "query") -> List[Dict[str, Any]]:
+        """Run an Ariel search to completion and return its result rows."""
         response = self._request(
             "POST", f"{self.base_url}/ariel/searches",
             params={"query_expression": aql}, headers=self._headers(),
         )
         search_id = self._json(response, "QRadar").get("search_id")
         if not search_id:
-            raise NonRetryableError(f"QRadar did not return a search_id for {ip}")
-
+            raise NonRetryableError(f"QRadar did not return a search_id for {label}")
         try:
             self._wait_for_search(search_id)
             response = self._request(
                 "GET", f"{self.base_url}/ariel/searches/{search_id}/results",
                 headers=self._headers(),
             )
-            events = self._json(response, "QRadar").get("events", [])
+            return self._json(response, "QRadar").get("events", [])
         finally:
             self._delete_search(search_id)
 
-        last_seen = events[0].get("last_seen") if events else None
-        if not last_seen:
-            return None
-        return epoch_to_datetime(last_seen)
+    # ─── Metrics (Phase 4) ────────────────────────────────────────────────────
+
+    supports_metrics = True
+
+    def _fetch_metrics(self, window_hours: float) -> List[Dict[str, Any]]:
+        """
+        One AQL search per tenant, grouped by log source, log type (high-level
+        category) and parse state. `metrics_aql` may override it; it must return
+        logsourceid, log_type, events and may return isunparsed, max_lag, min_lag
+        (milliseconds between receive time and device time).
+        """
+        minutes = max(1, int(window_hours * 60))
+        aql = self.platform_cfg.get("metrics_aql", METRICS_AQL).format(minutes=minutes)
+        by_id = {s.get("id"): s for s in self.list_known_sources() if s.get("id") is not None}
+        per_source: Dict[Any, Dict[str, Any]] = {}
+        for row in self._run_aql(aql, "metrics"):
+            source = by_id.get(row.get("logsourceid"), {})
+            entry = per_source.setdefault(row.get("logsourceid"), {
+                "name": source.get("name") or str(row.get("logsourceid")),
+                "identifier": source.get("identifier") or "",
+                "events": 0, "unparsed": 0, "log_types": set(), "max_skew_seconds": None,
+            })
+            count = int(row.get("events") or 0)
+            entry["events"] += count
+            if row.get("log_type"):
+                entry["log_types"].add(str(row["log_type"]))
+            if str(row.get("isunparsed")).lower() in ("true", "1"):
+                entry["unparsed"] += count
+            lags = [abs(float(row[k])) / 1000 for k in ("max_lag", "min_lag") if row.get(k) is not None]
+            if lags:
+                entry["max_skew_seconds"] = max([entry["max_skew_seconds"] or 0, *lags])
+        for entry in per_source.values():
+            entry["log_types"] = sorted(entry["log_types"])
+        return list(per_source.values())
 
     def _wait_for_search(self, search_id: str):
         """Poll an Ariel search until it completes, fails or times out."""
@@ -226,5 +269,5 @@ class QRadarClient(BaseSIEMClient):
         now = datetime.now(tz=timezone.utc)
         rng = self._mock_rng(device)
         if rng.random() < 0.65:
-            return now - timedelta(hours=rng.uniform(0.1, 22))
+            return now - timedelta(hours=rng.uniform(0.02, 0.9))
         return now - timedelta(hours=rng.uniform(25, 96))

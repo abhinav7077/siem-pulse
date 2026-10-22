@@ -35,6 +35,7 @@ class ReportGenerator:
         "healthy": "✅ HEALTHY",
         "stale":   "❌ STALE  ",
         "error":   "⚠️  ERROR  ",
+        "degraded": "🟠 DEGRADED",
     }
 
     def __init__(self, config: dict):
@@ -57,16 +58,19 @@ class ReportGenerator:
         healthy = [r for r in results if r["status"] == "healthy"]
         stale   = [r for r in results if r["status"] == "stale"]
         error   = [r for r in results if r["status"] == "error"]
+        degraded = [r for r in results if r["status"] == "degraded"]
 
         return {
             "healthy": healthy,
             "stale":   stale,
             "error":   error,
+            "degraded": degraded,
             "summary": {
                 "total":          len(results),
                 "healthy_count":  len(healthy),
                 "stale_count":    len(stale),
                 "error_count":    len(error),
+                "degraded_count": len(degraded),
                 "suppressed_count": sum(1 for r in results if r.get("suppressed") and r["status"] != "healthy"),
                 "generated_at":   datetime.now(tz=timezone.utc).strftime(
                     "%Y-%m-%d %H:%M:%S UTC"
@@ -115,6 +119,7 @@ class ReportGenerator:
         sorted_results = (
             sorted(report["stale"],   key=lambda x: (x.get("client_name") or "", x["device_name"])) +
             sorted(report["error"],   key=lambda x: (x.get("client_name") or "", x["device_name"])) +
+            sorted(report["degraded"], key=lambda x: (x.get("client_name") or "", x["device_name"])) +
             sorted(report["healthy"], key=lambda x: (x.get("client_name") or "", x["device_name"]))
         )
 
@@ -156,6 +161,7 @@ class ReportGenerator:
             f"✅ Healthy: {summary['healthy_count']:,} ({health_pct}%)  |  "
             f"❌ Stale: {summary['stale_count']:,}  |  "
             f"⚠️  Error: {summary['error_count']:,}"
+            + (f"  |  🟠 Degraded: {summary['degraded_count']:,}" if summary["degraded_count"] else "")
             + (f"  |  🔕 Suppressed: {summary['suppressed_count']:,}" if summary["suppressed_count"] else "")
         )
         print(f"{border}\n")
@@ -175,7 +181,7 @@ class ReportGenerator:
           soc_log_report_qradar_20260325_103000.csv
           soc_log_report_qradar_acme_corp_20260325_103000.csv
         """
-        all_results = report["healthy"] + report["stale"] + report["error"]
+        all_results = report["healthy"] + report["stale"] + report["error"] + report["degraded"]
         if not all_results:
             logger.warning("No results to save to CSV.")
             return None
@@ -204,6 +210,7 @@ class ReportGenerator:
                 ordered = (
                     sorted(report["stale"],   key=lambda x: x.get("device_name", "")) +
                     sorted(report["error"],   key=lambda x: x.get("device_name", "")) +
+                    sorted(report["degraded"], key=lambda x: x.get("device_name", "")) +
                     sorted(report["healthy"], key=lambda x: x.get("device_name", ""))
                 )
                 for row in ordered:

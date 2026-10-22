@@ -212,6 +212,24 @@ alerting:
 #     start: "2026-11-02T18:00:00Z"
 #     end: "2026-11-03T06:00:00Z"
 
+# ── Deeper detection: "alive but broken" log sources ────────────────────────
+# Needs QRadar, Splunk, Elastic, Sentinel or FortiSIEM (lookup: grouped).
+# Costs one extra query per SIEM tenant per run.
+detection:
+  enabled: false
+  window_hours: 1               # activity window measured each run
+  baseline_days: 7
+  min_samples: 12               # history needed before volume drops are judged
+  drop_ratio: 0.2               # alert below 20% of the median events/hour
+  unparsed_ratio: 0.2           # alert when >20% of events are unparsed
+  max_clock_skew_minutes: 15
+  findings_status: degraded     # degraded (alerts) | healthy (report only)
+
+# ── MITRE ATT&CK coverage (inventory column device_type) ────────────────────
+# attack:
+#   device_types:               # add or override device type -> data sources
+#     nac: ["Network Traffic", "Logon Session"]
+
 # ── Run history (state-aware alerts, digests, dashboard) ────────────────────
 state:
   path: siem_pulse.db

@@ -102,6 +102,13 @@ GROUPED_QUERY_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
+METRICS_QUERY_TEMPLATE = GROUPED_QUERY_TEMPLATE.replace(
+    "reptDevIpAddr,reptDevName,MAX(phRecvTime)", "reptDevIpAddr,reptDevName,eventType,COUNT(*)"
+).replace(
+    "<AttrList>reptDevIpAddr,reptDevName</AttrList>", "<AttrList>reptDevIpAddr,reptDevName,eventType</AttrList>"
+).replace("last log per device", "event counts per device")
+
+
 def parse_fortisiem_time(value: str) -> datetime:
     """
     Parse the time formats FortiSIEM returns: epoch seconds/milliseconds,
@@ -270,29 +277,60 @@ class FortiSIEMClient(BaseSIEMClient):
 
     # ─── Grouped (bulk) lookup ────────────────────────────────────────────────
 
-    def _fetch_inventory(self) -> List[Dict[str, Any]]:
-        low, high = self._window()
-        query_id = self._post_query(GROUPED_QUERY_TEMPLATE.format(low=low, high=high), "grouped query")
+    def _grouped_rows(self, body: str, label: str):
+        """Run a grouped query and yield each result row's attribute values."""
+        query_id = self._post_query(body, label)
         self._wait_for_query(query_id)
-
-        by_device: Dict[tuple, Dict[str, Any]] = {}
         start = 0
         while True:
             response = self._call(
                 "GET", f"/query/events/{query_id}/{start}/{start + self.page_size}",
                 headers={"Accept": "application/xml"},
             )
-            events = self._parse_xml(response.text, "grouped query").findall(".//event")
+            events = self._parse_xml(response.text, label).findall(".//event")
             for event in events:
-                values = self._event_values(event)
-                key = (values.get("reptDevIpAddr", ""), values.get("reptDevName", ""))
-                when = self._event_time(values)
-                current = by_device.get(key)
-                if current is None or (when and (not current["last_seen"] or when > current["last_seen"])):
-                    by_device[key] = {"identifier": key[0], "name": key[1], "last_seen": when}
+                yield self._event_values(event)
             if len(events) < self.page_size:
-                return list(by_device.values())
+                return
             start += self.page_size
+
+    def _fetch_inventory(self) -> List[Dict[str, Any]]:
+        low, high = self._window()
+        by_device: Dict[tuple, Dict[str, Any]] = {}
+        for values in self._grouped_rows(GROUPED_QUERY_TEMPLATE.format(low=low, high=high), "grouped query"):
+            key = (values.get("reptDevIpAddr", ""), values.get("reptDevName", ""))
+            when = self._event_time(values)
+            current = by_device.get(key)
+            if current is None or (when and (not current["last_seen"] or when > current["last_seen"])):
+                by_device[key] = {"identifier": key[0], "name": key[1], "last_seen": when}
+        return list(by_device.values())
+
+    # ─── Metrics (Phase 4, grouped mode only) ─────────────────────────────────
+
+    @property
+    def supports_metrics(self) -> bool:
+        return self.lookup == "grouped"
+
+    def _fetch_metrics(self, window_hours: float) -> List[Dict[str, Any]]:
+        """Event count and event types per reporting device."""
+        high = int(time.time())
+        low = high - int(window_hours * 3600)
+        per_device: Dict[tuple, Dict[str, Any]] = {}
+        for values in self._grouped_rows(METRICS_QUERY_TEMPLATE.format(low=low, high=high), "metrics query"):
+            key = (values.get("reptDevIpAddr", ""), values.get("reptDevName", ""))
+            entry = per_device.setdefault(key, {"identifier": key[0], "name": key[1], "events": 0,
+                                                "log_types": set(), "unparsed": 0})
+            count = next((v for k, v in values.items() if k and k.upper().startswith("COUNT")), "0")
+            count = int(float(count or 0))
+            entry["events"] += count
+            category = values.get("phEventCategory") or values.get("eventType") or ""
+            if category:
+                entry["log_types"].add(category)
+            if str(values.get("eventType", "")).lower().startswith("unknown"):
+                entry["unparsed"] += count
+        for entry in per_device.values():
+            entry["log_types"] = sorted(entry["log_types"])
+        return list(per_device.values())
 
     # ─── Mock ─────────────────────────────────────────────────────────────────
 
@@ -304,5 +342,5 @@ class FortiSIEMClient(BaseSIEMClient):
         now = datetime.now(tz=timezone.utc)
         rng = self._mock_rng(device)
         if rng.random() < 0.75:
-            return now - timedelta(hours=rng.uniform(0.2, 23))
+            return now - timedelta(hours=rng.uniform(0.02, 0.9))
         return now - timedelta(hours=rng.uniform(26, 80))

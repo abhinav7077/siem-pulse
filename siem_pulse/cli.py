@@ -39,6 +39,8 @@ from siem_pulse import __version__
 
 from siem_pulse.inventory_sources import load_inventory
 from siem_pulse.alert_policy import classify, digest_batch, digest_due
+from siem_pulse.coverage import print_coverage
+from siem_pulse.detection import run_detection
 from siem_pulse.log_checker import LogChecker, device_key
 from siem_pulse.state_store import StateStore, to_iso
 from siem_pulse.suppression import apply_suppression, matches, parse_until
@@ -117,6 +119,9 @@ class ProgressTracker:
         self._done = 0
         self._lock = threading.Lock()
         self._start = datetime.now()
+        # Draw the bar only on a terminal; in cron/docker logs print every 10% instead
+        self.interactive = sys.stdout.isatty()
+        self._next_report = 10
 
     def increment(self):
         with self._lock:
@@ -125,6 +130,11 @@ class ProgressTracker:
             rate = self._done / elapsed if elapsed > 0 else 0
             remaining = (self.total - self._done) / rate if rate > 0 else 0
             pct = (self._done / self.total) * 100
+            if not self.interactive:
+                if pct >= self._next_report or self._done == self.total:
+                    print(f"  progress: {self._done}/{self.total} devices ({pct:.0f}%)", flush=True)
+                    self._next_report = (int(pct) // 10 + 1) * 10
+                return
             bar_len = 35
             filled = int(bar_len * self._done / self.total)
             bar = "█" * filled + "░" * (bar_len - filled)
@@ -345,6 +355,8 @@ def run_check(
     reporter.save_csv(
         report, filter_siem=filter_siem, filter_client=filter_client
     )
+    if config.get("reporting", {}).get("show_coverage", True):
+        print_coverage(results, config)
 
     # ── Step 8: Alerts on what changed ────────────────────────────────────────
     batch = classify(results, previous, config, scope=scope)
@@ -359,10 +371,11 @@ def run_check(
     rate = len(devices) / elapsed if elapsed > 0 else 0
     stale = sum(1 for r in results if r["status"] == "stale")
     errors = sum(1 for r in results if r["status"] == "error")
+    degraded = sum(1 for r in results if r["status"] == "degraded")
     logger.info(
         f"Cycle done | {len(devices)} devices | "
         f"{elapsed:.1f}s | {rate:.1f} devices/sec | "
-        f"Stale: {stale} | Errors: {errors} | Suppressed: {suppressed}"
+        f"Stale: {stale} | Errors: {errors} | Degraded: {degraded} | Suppressed: {suppressed}"
     )
     logger.info("=" * 70)
     run_after_run_hooks(config, store, results, elapsed)
@@ -374,6 +387,10 @@ def run_check(
 
 def run_post_check_hooks(results: List[Dict[str, Any]], config: dict, store: StateStore):
     """Extra checks on the results before reporting (deeper detection)."""
+    try:
+        run_detection(results, config, store)
+    except Exception as e:  # detection must never stop the main check
+        logging.getLogger("soc_monitor").error(f"Detection failed, continuing without it: {e}")
 
 
 def run_after_run_hooks(config: dict, store: StateStore, results: List[Dict[str, Any]], elapsed: float):

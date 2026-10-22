@@ -37,7 +37,7 @@ SNOW_IMPACT = {"critical": "1", "high": "2", "medium": "2", "low": "3"}
 
 
 def _summary(item: Dict[str, Any]) -> str:
-    what = "no logs" if item.get("status") == "stale" else "log check failing"
+    what = {"stale": "no logs", "degraded": "log quality problem"}.get(item.get("status"), "log check failing")
     return f"[SIEM Pulse] {item.get('device_name')} ({item.get('client_name') or 'N/A'}) — {what}"
 
 

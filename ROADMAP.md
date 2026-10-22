@@ -126,15 +126,16 @@ reminder → recovered.)*
 
 **Goal:** catch log sources that are sending *something* but not the right thing.
 
-- [ ] Event volume baselines (EPS per source) with drop alerts, e.g. "below 20% of 7-day median"
-- [ ] Detect missing log *types* (e.g. firewall sends system logs but no traffic logs)
-- [ ] Detect parsing failures / unknown-event spikes where the SIEM exposes them
-- [ ] Clock-skew detection (event time far from receive time)
-- [ ] Coverage scoring per client (percentage of expected sources healthy)
-- [ ] MITRE ATT&CK data source mapping: show which detections are blind when a source is down
+- [x] Event volume baselines (EPS per source) with drop alerts, e.g. "below 20% of 7-day median"
+- [x] Detect missing log *types* (e.g. firewall sends system logs but no traffic logs)
+- [x] Detect parsing failures / unknown-event spikes where the SIEM exposes them
+- [x] Clock-skew detection (event time far from receive time)
+- [x] Coverage scoring per client (percentage of expected sources healthy)
+- [x] MITRE ATT&CK data source mapping: show which detections are blind when a source is down
 
 **Exit check:** a simulated 90% volume drop on a healthy-looking source raises
-an alert within one run.
+an alert within one run. *(Covered by tests; real-SIEM metric queries still
+need a live check — see the testing notes in the pull request.)*
 
 ---
 

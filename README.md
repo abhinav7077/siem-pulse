@@ -28,6 +28,8 @@ A device that stops logging is a blind spot: attacks on it go undetected. SIEM P
 - 🎯 Per-device thresholds and criticality, snoozes and maintenance windows
 - 📬 Channels: email (HTML + text), Slack, Microsoft Teams, PagerDuty, Opsgenie, ServiceNow, Jira, generic webhook (SOAR)
 - 🧭 Routing per client / criticality, plus a daily digest
+- 📉 Deeper detection: volume drops vs a 7-day baseline, missing log types, unparsed events, clock skew
+- 🗺️ Coverage score per client and MITRE ATT&CK data-source blind spots
 - 🔄 Retry logic with exponential backoff
 - 🔐 Secure credential handling via environment variables
 - 📅 Scheduled execution (run every N minutes)
@@ -279,6 +281,34 @@ Weekly or one-off `maintenance_windows` in `config.yaml` match devices by client
 | `jira` | One issue per outage, comments, optional resolve transition | `JIRA_EMAIL` + `JIRA_API_TOKEN` |
 
 Ticket ids are stored, so re-runs never create duplicates. **Daily digest:** set `alerting.digest` or run `siem-pulse --digest`.
+
+## Deeper detection: alive but broken
+
+A device can pass the last-seen check while its logs are useless: a firewall that only sends system messages after a config change, a parser that broke after an upgrade, a clock that drifted. Turn on `detection.enabled` and each run also measures, per source, over the last `window_hours`:
+
+| Check | Finding when |
+|-------|--------------|
+| Volume drop | events/hour < `drop_ratio` × the `baseline_days` median (needs `min_samples` runs of history) |
+| Volume floor | events/hour < the device's `min_events_per_hour` |
+| Missing log types | an `expected_log_types` entry (e.g. `traffic`) matches none of the categories / sourcetypes / tables seen |
+| Unparsed events | more than `unparsed_ratio` of events could not be parsed |
+| Clock skew | event time and receive time differ by more than `max_clock_skew_minutes` |
+
+Devices with findings become **🟠 degraded** and alert like stale devices (or set `findings_status: healthy` to only report them). Supported on QRadar, Splunk, Elastic, Sentinel and FortiSIEM (`lookup: grouped`).
+
+## Coverage and ATT&CK blind spots
+
+Every run prints a **coverage score** per client (healthy share of devices, weighted by criticality; degraded counts half) and, using the inventory's `device_type` column, the **MITRE ATT&CK data sources** that have no working log source:
+
+```
+  COVERAGE BY CLIENT (criticality-weighted)
+    Acme Corp                      ███████░░░  72.7%  11 devices  (2 down)
+
+  ATT&CK BLIND SPOTS (no working log source for these data sources)
+    Acme Corp                      Network Traffic (DS0029) — down: fw-edge-01, fw-edge-02
+```
+
+Built-in device types: `firewall`, `ngfw`, `router`, `switch`, `ids`, `ips`, `waf`, `proxy`, `vpn`, `dns`, `domain_controller`, `windows_server`, `windows_workstation`, `linux_server`, `edr`, `email_gateway`, `identity_provider`, `cloud`, `database`, `web_server`. Add your own under `attack.device_types`. Data-source names and IDs follow ATT&CK v17.
 
 ## Multi-client setups
 

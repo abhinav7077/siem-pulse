@@ -98,7 +98,14 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 """
 
-ISSUE_STATUSES = ("stale", "error")
+ISSUE_STATUSES = ("stale", "error", "degraded")
+
+# Columns added after the first release; created on open if missing.
+MIGRATIONS = [
+    ("runs", "degraded", "INTEGER DEFAULT 0"),
+    ("results", "device_type", "TEXT"),
+    ("results", "findings", "TEXT"),
+]
 
 
 def utcnow() -> datetime:
@@ -127,6 +134,10 @@ class StateStore:
         self._conn.row_factory = sqlite3.Row
         with self._lock:
             self._conn.executescript(SCHEMA)
+            for table, column, kind in MIGRATIONS:
+                existing = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+                if column not in existing:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
             self._conn.commit()
 
     @classmethod
@@ -156,25 +167,26 @@ class StateStore:
             return int(cur.lastrowid)
 
     def finish_run(self, run_id: int, results: List[Dict[str, Any]], duration_seconds: float):
-        counts = {"healthy": 0, "stale": 0, "error": 0}
+        counts = {"healthy": 0, "stale": 0, "error": 0, "degraded": 0}
         suppressed = 0
         for r in results:
             counts[r["status"]] = counts.get(r["status"], 0) + 1
             suppressed += 1 if r.get("suppressed") else 0
         with self._tx() as c:
             c.execute(
-                "UPDATE runs SET finished_at=?, total=?, healthy=?, stale=?, error=?, suppressed=?, "
+                "UPDATE runs SET finished_at=?, total=?, healthy=?, stale=?, error=?, degraded=?, suppressed=?, "
                 "duration_seconds=? WHERE id=?",
                 (to_iso(utcnow()), len(results), counts["healthy"], counts["stale"], counts["error"],
-                 suppressed, duration_seconds, run_id),
+                 counts["degraded"], suppressed, duration_seconds, run_id),
             )
             c.executemany(
                 "INSERT INTO results (run_id, device_key, device_name, ip_address, client_name, siem_platform,"
-                " criticality, status, suppressed, last_log_time, hours_since_last_log, error, checked_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " criticality, status, suppressed, last_log_time, hours_since_last_log, error, checked_at,"
+                " device_type, findings) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 [(run_id, r["device_key"], r.get("device_name"), r.get("ip_address"), r.get("client_name"),
                   r.get("siem_platform"), r.get("criticality"), r["status"], r.get("suppressed"),
-                  r.get("last_log_time"), r.get("hours_since_last_log"), r.get("error"), r.get("checked_at"))
+                  r.get("last_log_time"), r.get("hours_since_last_log"), r.get("error"), r.get("checked_at"),
+                  r.get("device_type"), "; ".join(r.get("findings") or []) or None)
                  for r in results],
             )
             if self.keep_days:

@@ -164,5 +164,5 @@ class SeceonClient(BaseSIEMClient):
         now = datetime.now(tz=timezone.utc)
         rng = self._mock_rng(device)
         if rng.random() < 0.70:
-            return now - timedelta(hours=rng.uniform(0.5, 20))
+            return now - timedelta(hours=rng.uniform(0.02, 0.9))
         return now - timedelta(hours=rng.uniform(25, 72))
