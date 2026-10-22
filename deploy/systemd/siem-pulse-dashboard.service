@@ -1,0 +1,21 @@
+# Long-running dashboard (reads the same SQLite history as the timer runs).
+[Unit]
+Description=SIEM Pulse dashboard
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=siempulse
+Group=siempulse
+WorkingDirectory=/var/lib/siem-pulse
+EnvironmentFile=-/etc/siem-pulse/siem-pulse.env
+ExecStart=/opt/siem-pulse/venv/bin/siem-pulse --config /etc/siem-pulse/config.yaml --dashboard
+Restart=on-failure
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/siem-pulse
+
+[Install]
+WantedBy=multi-user.target

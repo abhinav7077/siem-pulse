@@ -1,0 +1,7 @@
+SIEM Pulse is running (checks every {{ .Values.config.scheduler.interval_minutes | default 60 }} minutes).
+
+Dashboard:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "siem-pulse.fullname" . }} 8080:{{ .Values.service.port }}
+  open http://127.0.0.1:8080/?token=<DASHBOARD_TOKEN_ADMIN from secret {{ .Values.existingSecret }}>
+
+Prometheus: scrape /metrics with "Authorization: Bearer <token>" (or set config.dashboard.metrics_public: true).

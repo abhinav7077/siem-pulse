@@ -167,16 +167,17 @@ need a live check — see the testing notes in the pull request.)*
 
 **Goal:** make SIEM Pulse easy to deploy, run and watch.
 
-- [ ] Web dashboard (Streamlit or FastAPI + HTMX): health by client, by SIEM, trends over time
-- [ ] Prometheus `/metrics` endpoint and a sample Grafana dashboard
-- [ ] Dockerfile and `docker-compose.yml`
-- [ ] Helm chart / Kubernetes CronJob example
-- [ ] systemd unit and timer example
-- [ ] Structured JSON logging option
-- [ ] Health check of the monitor itself (alert if a scheduled run does not happen)
-- [ ] Role-based access for the dashboard when exposed to clients
+- [x] Web dashboard (built in, no extra dependencies): health by client, trends, open issues, ATT&CK gaps
+- [x] Prometheus `/metrics` endpoint and a sample Grafana dashboard
+- [x] Dockerfile and `docker-compose.yml`
+- [x] Helm chart / Kubernetes CronJob example
+- [x] systemd unit and timer example
+- [x] Structured JSON logging option
+- [x] Health check of the monitor itself (alert if a scheduled run does not happen)
+- [x] Role-based access for the dashboard when exposed to clients
 
 **Exit check:** `docker compose up` gives a working dashboard on mock data in under a minute.
+*(Verified: image built and run locally — first check and dashboard up in about 5 seconds.)*
 
 ---
 

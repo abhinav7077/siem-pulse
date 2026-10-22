@@ -1,0 +1,11 @@
+[Unit]
+Description=Run SIEM Pulse every hour
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+RandomizedDelaySec=2min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

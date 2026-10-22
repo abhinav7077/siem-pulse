@@ -245,7 +245,32 @@ reporting:
 scheduler:
   interval_minutes: 60
 
+# ── Dashboard (siem-pulse --dashboard) ──────────────────────────────────────
+dashboard:
+  host: 127.0.0.1               # use 0.0.0.0 (or --host) to expose it — then users are required
+  port: 8080
+  users:                        # token per user; clients: "*" or a list of client names
+    - name: admin
+      token_secret: DASHBOARD_TOKEN_ADMIN
+      clients: "*"
+    # - name: acme
+    #   token_secret: DASHBOARD_TOKEN_ACME
+    #   clients: ["Acme Corp"]
+  allow_anonymous: false
+  metrics_public: false         # true: Prometheus can scrape /metrics without a token
+
+# ── Operations ──────────────────────────────────────────────────────────────
+heartbeat:
+  ping_url: ""                  # e.g. https://hc-ping.com/<uuid>, pinged after every run
+  ping_on_failure: true
+  # max_age_minutes: 125        # /healthz and --check-heartbeat (default 2 x interval + 5)
+
+metrics:
+  textfile: ""                  # e.g. /var/lib/node_exporter/textfile/siem_pulse.prom
+  per_device: true
+
 # ── Logging ─────────────────────────────────────────────────────────────────
 logging:
   level: INFO                   # DEBUG | INFO | WARNING | ERROR
   file: "soc_monitor.log"
+  format: text                  # text | json (one JSON object per line)

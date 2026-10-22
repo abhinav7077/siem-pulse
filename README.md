@@ -30,6 +30,8 @@ A device that stops logging is a blind spot: attacks on it go undetected. SIEM P
 - 🧭 Routing per client / criticality, plus a daily digest
 - 📉 Deeper detection: volume drops vs a 7-day baseline, missing log types, unparsed events, clock skew
 - 🗺️ Coverage score per client and MITRE ATT&CK data-source blind spots
+- 🖥️ Built-in web dashboard with per-client access, Prometheus `/metrics`, `/healthz` and a Grafana dashboard
+- 🐳 Docker image, Compose, Helm chart, Kubernetes CronJob and systemd timers; JSON logs and heartbeat pings
 - 🔄 Retry logic with exponential backoff
 - 🔐 Secure credential handling via environment variables
 - 📅 Scheduled execution (run every N minutes)
@@ -310,6 +312,32 @@ Every run prints a **coverage score** per client (healthy share of devices, weig
 
 Built-in device types: `firewall`, `ngfw`, `router`, `switch`, `ids`, `ips`, `waf`, `proxy`, `vpn`, `dns`, `domain_controller`, `windows_server`, `windows_workstation`, `linux_server`, `edr`, `email_gateway`, `identity_provider`, `cloud`, `database`, `web_server`. Add your own under `attack.device_types`. Data-source names and IDs follow ATT&CK v17.
 
+## Dashboard, metrics and operations
+
+```bash
+siem-pulse --dashboard                      # http://127.0.0.1:8080 (reads the run history)
+siem-pulse --schedule --dashboard           # checks + dashboard in one process
+siem-pulse --check-heartbeat                # alert + exit 2 if no run finished recently
+```
+
+- **Dashboard:** overview cards, trend, coverage per client, open issues, ATT&CK blind spots and a page per client. No extra dependencies, no external assets, strict security headers.
+- **Access control:** `dashboard.users` gives each user a token and a list of clients (`"*"` for all). Customers can see only their own devices, including in the API and metrics. Without users the dashboard only listens on localhost.
+- **API:** `/api/summary`, `/api/issues`, `/api/runs` (JSON).
+- **Prometheus:** `/metrics` (`siem_pulse_up`, `siem_pulse_devices{client,siem,status}`, `siem_pulse_client_coverage_score`, `siem_pulse_device_hours_since_last_log`, run time and duration), or write them to a node_exporter textfile with `metrics.textfile`. A Grafana dashboard is in `deploy/grafana/`.
+- **Is the monitor itself alive?** `/healthz` returns 503 when no run finished within `heartbeat.max_age_minutes`; `heartbeat.ping_url` pings Healthchecks.io / Cronitor / Uptime Kuma after every run (and `/fail` on a crash); `--check-heartbeat` alerts your channels once.
+- **Logs:** `logging.format: json` writes one JSON object per line for Splunk / Elastic / Loki.
+
+## Deploy
+
+| Option | Files |
+|--------|-------|
+| Docker | `docker build -t siem-pulse .` then `docker compose up -d` (set `DASHBOARD_TOKEN_ADMIN` in `.env`) |
+| Kubernetes (Helm) | `helm install siem-pulse deploy/helm/siem-pulse` — checks + dashboard in one pod, history on a PVC |
+| Kubernetes (plain) | `deploy/kubernetes/cronjob.yaml` — hourly CronJob |
+| Linux server | `deploy/systemd/` — hourly timer, dashboard service, self-check timer |
+
+Details and install commands: [deploy/README.md](deploy/README.md). The image runs as a non-root user and works with a read-only root filesystem. Behind a TLS-inspecting proxy, build with `--secret id=pip_ca,src=corp-ca.pem`.
+
 ## Multi-client setups
 
 For MSSPs and SOCs with many clients, each device row can point to its own SIEM tenant:
@@ -414,8 +442,9 @@ HTML-formatted email listing all stale and error devices, sent to configured rec
 ## Running as a Cron Job (Alternative to `--schedule`)
 
 ```bash
-# Run every hour (Linux cron)
-0 * * * * cd /opt/soc_monitor && /usr/bin/python3 main.py >> /var/log/soc_monitor_cron.log 2>&1
+# Run every hour, and check every 15 minutes that runs are still happening
+7 * * * *    cd /var/lib/siem-pulse && siem-pulse --config /etc/siem-pulse/config.yaml
+*/15 * * * * cd /var/lib/siem-pulse && siem-pulse --config /etc/siem-pulse/config.yaml --check-heartbeat
 ```
 
 ---

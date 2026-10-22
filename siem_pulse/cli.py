@@ -41,6 +41,7 @@ from siem_pulse.inventory_sources import load_inventory
 from siem_pulse.alert_policy import classify, digest_batch, digest_due
 from siem_pulse.coverage import print_coverage
 from siem_pulse.detection import run_detection
+from siem_pulse.ops import JsonFormatter, check_heartbeat, ping_heartbeat, write_metrics_textfile
 from siem_pulse.log_checker import LogChecker, device_key
 from siem_pulse.state_store import StateStore, to_iso
 from siem_pulse.suppression import apply_suppression, matches, parse_until
@@ -61,12 +62,16 @@ def setup_logging(config: dict) -> logging.Logger:
     handlers = [logging.StreamHandler(sys.stdout)]
     if log_file:
         handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
+    if str(config.get("logging", {}).get("format", "text")).lower() == "json":
+        for handler in handlers:
+            handler.setFormatter(JsonFormatter())
 
     logging.basicConfig(
         level=log_level,
         format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=handlers,
+        force=True,
     )
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     return logging.getLogger("soc_monitor")
@@ -104,6 +109,15 @@ def load_config(config_path: str = "config.yaml") -> dict:
 def sheet_name(config: dict) -> str:
     """Excel sheet holding the device inventory (config: devices.sheet_name)."""
     return config.get("devices", {}).get("sheet_name") or "Devices"
+
+
+def resolve_beside_config(path: str, config_path: str) -> str:
+    """A relative inventory path that is not in the working directory is looked up next to the config."""
+    candidate = Path(path)
+    if candidate.is_absolute() or candidate.exists():
+        return path
+    beside = Path(config_path).resolve().parent / candidate
+    return str(beside) if beside.exists() else path
 
 
 # ─── Progress Tracker (thread-safe) ──────────────────────────────────────────
@@ -395,6 +409,14 @@ def run_post_check_hooks(results: List[Dict[str, Any]], config: dict, store: Sta
 
 def run_after_run_hooks(config: dict, store: StateStore, results: List[Dict[str, Any]], elapsed: float):
     """Things to do once a run is recorded (metrics export, heartbeat)."""
+    log = logging.getLogger("soc_monitor")
+    try:
+        path = write_metrics_textfile(config, store)
+        if path:
+            log.info(f"Prometheus metrics written to {path}")
+    except OSError as e:
+        log.error(f"Could not write metrics textfile: {e}")
+    ping_heartbeat(config)
 
 
 # ─── Digest and snoozes ───────────────────────────────────────────────────────
@@ -488,6 +510,12 @@ def main():
     parser.add_argument("--list-snoozes", action="store_true", help="Show active snoozes")
     parser.add_argument("--digest",       action="store_true",
                         help="Send the open-issues digest now (no SIEM calls)")
+    parser.add_argument("--dashboard",    action="store_true",
+                        help="Serve the web dashboard (with --schedule: alongside the checks)")
+    parser.add_argument("--host",         default=None, help="Dashboard address (default: dashboard.host)")
+    parser.add_argument("--port",         type=int, default=None, help="Dashboard port (default: dashboard.port)")
+    parser.add_argument("--check-heartbeat", action="store_true",
+                        help="Alert and exit 2 if no run finished recently (run from a separate cron)")
     parser.add_argument("--reconcile",    action="store_true",
                         help="Compare inventory with sources the SIEMs know, then exit")
 
@@ -496,7 +524,9 @@ def main():
     config = load_config(args.config)
     logger = setup_logging(config)
 
-    device_file = args.device_file or config.get("devices", {}).get("file", "sample_devices.xlsx")
+    device_file = args.device_file or resolve_beside_config(
+        config.get("devices", {}).get("file", "sample_devices.xlsx"), args.config
+    )
     num_threads = args.threads or config.get("performance", {}).get("threads", 10)
 
     # ── Discovery helpers (list and exit) ──────────────────────────────────────
@@ -536,6 +566,12 @@ def main():
     if args.snooze or args.unsnooze or args.list_snoozes:
         run_snooze_command(args, config, device_file, logger)
         return
+    if args.check_heartbeat:
+        store = StateStore.from_config(config)
+        healthy = check_heartbeat(config, store, AlertManager(config, store))
+        store.close()
+        print("  heartbeat ok" if healthy else "  heartbeat STALE — alert sent")
+        sys.exit(0 if healthy else 2)
     if args.digest:
         store = StateStore.from_config(config)
         maybe_send_digest(config, store, AlertManager(config, store), logger, force=True)
@@ -558,7 +594,12 @@ def main():
         dry_run=args.dry_run,
     )
 
-    # ── Schedule or single run ─────────────────────────────────────────────────
+    # ── Dashboard / schedule / single run ──────────────────────────────────────
+    if args.dashboard and not args.schedule:
+        from siem_pulse.dashboard import serve
+        serve(config, args.host, args.port)
+        return
+
     if args.schedule:
         try:
             import schedule as sched
@@ -566,15 +607,31 @@ def main():
             logger.error("'schedule' package not installed. Run: pip install schedule")
             sys.exit(1)
 
+        if args.dashboard:
+            from siem_pulse.dashboard import serve
+            serve(config, args.host, args.port, background=True)
+
+        def safe_run():
+            # One failed cycle (network down, bad file) must not stop the scheduler
+            try:
+                run_check(**run_kwargs)
+            except Exception as e:
+                logger.exception(f"Check cycle failed: {e}")
+                ping_heartbeat(config, failed=True)
+
         interval = config.get("scheduler", {}).get("interval_minutes", 60)
         logger.info(f"Scheduler mode — every {interval} minute(s)")
-        sched.every(interval).minutes.do(run_check, **run_kwargs)
-        run_check(**run_kwargs)       # Run immediately on launch
+        sched.every(interval).minutes.do(safe_run)
+        safe_run()                    # Run immediately on launch
         while True:
             sched.run_pending()
             time.sleep(30)
     else:
-        run_check(**run_kwargs)
+        try:
+            run_check(**run_kwargs)
+        except Exception:
+            ping_heartbeat(config, failed=True)
+            raise
 
 
 if __name__ == "__main__":
