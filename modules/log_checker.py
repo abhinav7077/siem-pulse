@@ -9,7 +9,9 @@ For each device:
   - Calls the appropriate SIEM client to fetch last log timestamp
   - Compares timestamp against current time
   - Classifies device as: healthy | stale | error
-  - Supports configurable retry with exponential backoff
+  - Retries only temporary failures (timeouts, connection errors, HTTP 5xx
+    and 429) with exponential backoff; honours the SIEM's Retry-After header
+  - Fails fast on permanent errors (bad credentials, bad input)
 """
 
 import logging
@@ -17,7 +19,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict
 
-from .siem_clients.base_client import BaseSIEMClient
+from .siem_clients.base_client import BaseSIEMClient, NonRetryableError, RateLimitedError
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +39,12 @@ class LogChecker:
         threshold_hours: int = 24,
         max_retries: int = 3,
         retry_delay: float = 5.0,
+        max_retry_after: float = 300.0,
     ):
         self.threshold_hours = threshold_hours
         self.max_retries = max_retries
         self.retry_delay = retry_delay
+        self.max_retry_after = max_retry_after
 
     def check_device(
         self, device: Dict[str, Any], client: BaseSIEMClient
@@ -74,7 +78,7 @@ class LogChecker:
                     # API succeeded but no events found — treat as stale
                     result["status"] = "stale"
                     result["last_log_time"] = "Never / Not Found"
-                    result["hours_since_last_log"] = float("inf")
+                    result["hours_since_last_log"] = None
                     return result
 
                 # Ensure timezone-aware for comparison
@@ -90,20 +94,27 @@ class LogChecker:
                 )
                 return result
 
+            except NonRetryableError as e:
+                logger.error(f"{device.get('device_name')}: {e} (not retrying)")
+                last_error = e
+                break
+
             except Exception as e:
                 last_error = e
-                if attempt < self.max_retries:
-                    wait = self.retry_delay * (2 ** (attempt - 1))  # Exponential backoff
-                    logger.warning(
-                        f"Attempt {attempt}/{self.max_retries} failed for "
-                        f"{device.get('device_name')} — retrying in {wait:.1f}s: {e}"
-                    )
-                    time.sleep(wait)
-                else:
+                if attempt >= self.max_retries:
                     logger.error(
                         f"All {self.max_retries} attempts failed for "
                         f"{device.get('device_name')}: {e}"
                     )
+                    break
+                wait = self.retry_delay * (2 ** (attempt - 1))  # Exponential backoff
+                if isinstance(e, RateLimitedError) and e.retry_after is not None:
+                    wait = max(wait, min(e.retry_after, self.max_retry_after))
+                logger.warning(
+                    f"Attempt {attempt}/{self.max_retries} failed for "
+                    f"{device.get('device_name')} — retrying in {wait:.1f}s: {e}"
+                )
+                time.sleep(wait)
 
         result["status"] = "error"
         result["error"] = str(last_error)

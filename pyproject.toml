@@ -39,6 +39,9 @@ dependencies = [
     "schedule>=1.2.0",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=7.4.0"]
+
 [project.urls]
 Homepage = "https://github.com/abhinav7077/siem-pulse"
 Repository = "https://github.com/abhinav7077/siem-pulse"
@@ -51,3 +54,6 @@ siem-pulse = "main:main"
 [tool.setuptools]
 py-modules = ["main"]
 packages = ["modules", "modules.siem_clients"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

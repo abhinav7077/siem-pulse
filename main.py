@@ -28,7 +28,7 @@ import sys
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -71,6 +71,11 @@ def load_config(config_path: str = "config.yaml") -> dict:
         raise FileNotFoundError(f"Config file not found: {config_path}")
     with open(path, "r") as f:
         return yaml.safe_load(f)
+
+
+def sheet_name(config: dict) -> str:
+    """Excel sheet holding the device inventory (config: devices.sheet_name)."""
+    return config.get("devices", {}).get("sheet_name") or "Devices"
 
 
 # ─── Progress Tracker (thread-safe) ──────────────────────────────────────────
@@ -138,7 +143,7 @@ def check_one_device(
             "last_log_time": None,
             "hours_since_last_log": None,
             "error": str(e),
-            "checked_at": datetime.utcnow().isoformat(),
+            "checked_at": datetime.now(tz=timezone.utc).isoformat(),
         }
     finally:
         progress.increment()
@@ -180,7 +185,7 @@ def run_check(
     logger.info("=" * 70)
 
     # ── Step 1: Load inventory ────────────────────────────────────────────────
-    reader = ExcelReader(device_file)
+    reader = ExcelReader(device_file, sheet_name=sheet_name(config))
     all_devices = reader.load_devices()
     logger.info(f"Inventory total : {len(all_devices)} devices")
 
@@ -228,6 +233,7 @@ def run_check(
         threshold_hours=config.get("logic", {}).get("threshold_hours", 24),
         max_retries=config.get("siem", {}).get("max_retries", 3),
         retry_delay=config.get("siem", {}).get("retry_delay_seconds", 5),
+        max_retry_after=config.get("siem", {}).get("max_retry_after_seconds", 300),
     )
 
     # ── Step 5: Parallel device checks ───────────────────────────────────────
@@ -328,7 +334,7 @@ def main():
 
     # ── Discovery helpers (list and exit) ──────────────────────────────────────
     if args.list_clients or args.list_siems:
-        reader = ExcelReader(device_file)
+        reader = ExcelReader(device_file, sheet_name=sheet_name(config))
         devices = reader.load_devices()
 
         if args.list_clients:

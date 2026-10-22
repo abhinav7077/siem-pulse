@@ -1,6 +1,7 @@
 # SIEM Pulse — Log Source Health Monitor for QRadar, FortiSIEM & Seceon
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![CI](https://github.com/abhinav7077/siem-pulse/actions/workflows/ci.yml/badge.svg)](https://github.com/abhinav7077/siem-pulse/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![SIEM: QRadar | FortiSIEM | Seceon](https://img.shields.io/badge/SIEM-QRadar%20%7C%20FortiSIEM%20%7C%20Seceon-informational.svg)](#connecting-to-real-siem-apis)
 [![Roadmap](https://img.shields.io/badge/roadmap-phases-success.svg)](ROADMAP.md)
@@ -160,25 +161,33 @@ scheduler:
 
 ## Connecting to Real SIEM APIs
 
-### Seceon OTM
-1. Log into your Seceon tenant
-2. Go to **Settings → API Keys → Generate**
-3. Set `SECEON_API_KEY` in `.env`
-4. Update `siem.seceon.base_url` in `config.yaml` to your tenant URL
-5. Review `modules/siem_clients/seceon_client.py` — update the endpoint path and response parsing to match your Seceon version's API schema
+Every SIEM section in `config.yaml` accepts `verify_ssl: true | false | "/path/to/ca-bundle.pem"`. Keep it `true` (or point it at your internal CA) in production.
+
+### Seceon aiSIEM / OTM
+1. Log into your Seceon tenant and generate an API key
+2. Set `SECEON_API_KEY` in `.env`
+3. Set `siem.seceon.base_url` to your tenant URL
+4. Seceon publishes its API per tenant, so the request is configurable instead of hardcoded:
+   - `last_log_path` — endpoint path, may use `{ip}` and `{device_name}` (default `/devices/{ip}/lastlog`)
+   - `timestamp_fields` — response fields holding the last event time; dots for nested fields (e.g. `data.last_seen`); ISO 8601 or epoch values
+   - `auth_header` / `auth_scheme` — how the key is sent (default `Authorization: Bearer <key>`)
 
 ### IBM QRadar
-1. Go to **Admin → Authorized Services → Add Authorized Service**
-2. Copy the **SEC token**
-3. Set `QRADAR_SEC_TOKEN` in `.env`
-4. Update `siem.qradar.base_url` in `config.yaml`
-5. The client submits an AQL query — adjust the query in `qradar_client.py` if your event schema differs
+1. Go to **Admin → Authorized Services → Add Authorized Service** and copy the **SEC token**
+2. Set `QRADAR_SEC_TOKEN` in `.env` and `siem.qradar.base_url` in `config.yaml`
+3. Pick a lookup mode with `siem.qradar.lookup`:
+   - **`log_sources`** (default, recommended) — reads every log source and its `last_event_time` from `/config/event_sources/log_source_management/log_sources` in one paged call, cached for `log_source_cache_seconds`. A device matches when its `ip_address` equals the log source **identifier**, or its `device_name` equals the log source **name** or **identifier**.
+   - **`aql`** — runs one Ariel search per device, waits for it to complete, reads the result and deletes the search. The query comes from `aql_template` (placeholders `{ip}`, `{device_name}`); by default `device_name` must equal the QRadar log source name.
 
 ### FortiSIEM
-1. Ensure your FortiSIEM account has API/REST access
-2. Set `FORTISIEM_USER` and `FORTISIEM_PASS` in `.env`
-3. Update `siem.fortisiem.base_url` in `config.yaml`
-4. Review the query payload in `fortisiem_client.py` — FortiSIEM uses an XML-based query API in older versions; adapt as needed
+1. Ensure your FortiSIEM account has API access
+2. Set `FORTISIEM_USER` and `FORTISIEM_PASS` in `.env` — on multi-tenant deployments use the `org/user` form (e.g. `super/admin`)
+3. Set `siem.fortisiem.base_url` (must end in `/phoenix/rest`)
+4. The client uses FortiSIEM's event query API: it submits an XML query filtered on `reptDevIpAddr` over the last `query_window_hours`, polls `/query/progress/{id}` until 100%, then reads the newest event's `phRecvTime`
+
+### Error handling
+- Timeouts, connection errors, HTTP 5xx and HTTP 429 are retried with exponential backoff (`max_retries`, `retry_delay_seconds`); a 429's `Retry-After` header is honoured up to `max_retry_after_seconds`
+- Bad credentials (401/403), other 4xx responses, invalid IP addresses and unexpected response formats fail immediately with a clear error — retrying would not help
 
 ---
 
@@ -247,6 +256,17 @@ The phase-wise improvement plan — real-API fixes, multi-tenant support, smarte
 
 ---
 
+## Running Tests
+
+```bash
+pip install pytest
+python -m pytest
+```
+
+Tests use a fake HTTP layer, so they never contact a real SIEM. CI runs them on Python 3.10–3.13 for every push.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Check |
@@ -254,6 +274,8 @@ The phase-wise improvement plan — real-API fixes, multi-tenant support, smarte
 | `FileNotFoundError: sample_devices.xlsx` | Run from project root directory |
 | `SECEON_API_KEY not set` | Load your `.env` file before running |
 | All devices show ERROR | Ensure `mock_mode: true` in config or verify SIEM connectivity |
+| `authentication/authorisation failed (HTTP 401)` | Token or password is wrong or lacks API permission — not retried |
+| QRadar device shows `Never / Not Found` | No log source identifier/name matches the device's IP or name — check the log source in QRadar |
 | Email not sending | Check `SMTP_PASSWORD`, SMTP server, and port 587 access |
 | `Unknown SIEM platform` | Ensure `siem_platform` column in Excel uses lowercase: `seceon`, `qradar`, `fortisiem` |
 

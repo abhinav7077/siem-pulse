@@ -15,5 +15,5 @@ schedule>=1.2.0          # Periodic job runner (alternative to cron)
 # flask>=3.0.0           # Uncomment for Flask dashboard
 
 # Dev / testing (optional)
-# pytest>=7.4.0
+# pytest>=7.4.0         # Run tests: pip install pytest && python -m pytest
 # python-dotenv>=1.0.0   # Load .env file during development

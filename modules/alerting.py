@@ -20,6 +20,7 @@ Environment variables:
 import logging
 import os
 import smtplib
+import html
 import json
 from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
@@ -96,7 +97,9 @@ class AlertManager:
             f"{scope_label} — {now_str}"
         )
 
-        html_body = self._build_html_email(stale, errors, scope_label, now_str)
+        html_body = self._build_html_email(
+            stale, errors, scope_label, now_str, filter_siem, filter_client
+        )
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
         msg["From"] = sender
@@ -121,7 +124,12 @@ class AlertManager:
         errors: List[Dict],
         scope_label: str,
         now_str: str,
+        filter_siem: Optional[str] = None,
+        filter_client: Optional[str] = None,
     ) -> str:
+        esc = lambda value: html.escape(str(value if value is not None else "N/A"))
+        preview_cmd = self._preview_command(filter_siem, filter_client)
+
         def rows(devices: List[Dict], row_class: str, last_col_key: str) -> str:
             if not devices:
                 return (
@@ -130,11 +138,11 @@ class AlertManager:
                 )
             return "".join(
                 f"""<tr class="{row_class}">
-                    <td>{d.get('device_name', '')}</td>
-                    <td>{d.get('client_name', 'N/A')}</td>
-                    <td>{d.get('siem_platform', '').upper()}</td>
-                    <td>{d.get('ip_address', '')}</td>
-                    <td>{d.get(last_col_key, 'N/A')}</td>
+                    <td>{esc(d.get('device_name', ''))}</td>
+                    <td>{esc(d.get('client_name'))}</td>
+                    <td>{esc((d.get('siem_platform') or '').upper())}</td>
+                    <td>{esc(d.get('ip_address', ''))}</td>
+                    <td>{esc(d.get(last_col_key))}</td>
                 </tr>"""
                 for d in sorted(devices, key=lambda x: (x.get("client_name") or "", x.get("device_name") or ""))
             )
@@ -154,7 +162,7 @@ class AlertManager:
                       font-size: 13px; margin-bottom: 12px; }}
         </style></head><body>
             <h2>🚨 SOC Log Health Alert</h2>
-            <div class="scope">Scope: <strong>{scope_label}</strong> — {now_str}</div>
+            <div class="scope">Scope: <strong>{esc(scope_label)}</strong> — {now_str}</div>
 
             <h3 style="color:#e74c3c;">❌ Stale Devices ({len(stale)})</h3>
             <table>
@@ -172,7 +180,7 @@ class AlertManager:
 
             <p class="footer">
                 SOC Log Health Monitor — investigate log sources and restore log flow.<br>
-                Run <code>python main.py --client "{scope_label}" --dry-run</code>
+                Run <code>{esc(preview_cmd)}</code>
                 to preview affected devices.
             </p>
         </body></html>
@@ -197,20 +205,22 @@ class AlertManager:
         now_str = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         scope_label = self._scope_label(filter_siem, filter_client)
 
+        esc = self._slack_escape
+
         def fmt_list(devices: List[Dict], key: str) -> str:
             if not devices:
                 return "_None_"
             # Group by client
             by_client: Dict[str, list] = {}
             for d in devices:
-                by_client.setdefault(d.get("client_name", "N/A"), []).append(d)
+                by_client.setdefault(d.get("client_name") or "N/A", []).append(d)
             lines = []
             for client, devs in sorted(by_client.items()):
-                lines.append(f"*{client}*")
+                lines.append(f"*{esc(client)}*")
                 for d in devs:
                     lines.append(
-                        f"  • `{d['device_name']}` [{d.get('siem_platform','').upper()}] "
-                        f"{d['ip_address']} — {d.get(key, 'N/A')}"
+                        f"  • `{esc(d['device_name'])}` [{esc(d.get('siem_platform', '').upper())}] "
+                        f"{esc(d['ip_address'])} — {esc(d.get(key, 'N/A'))}"
                     )
             return "\n".join(lines)
 
@@ -264,6 +274,21 @@ class AlertManager:
             logger.error(f"Slack alert failed: {e}")
 
     # ─── Helpers ──────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _preview_command(filter_siem: Optional[str], filter_client: Optional[str]) -> str:
+        """Command an analyst can run to list the devices in this alert's scope."""
+        cmd = "python main.py --dry-run"
+        if filter_siem:
+            cmd += f" --siem {filter_siem}"
+        if filter_client:
+            cmd += f' --client "{filter_client}"'
+        return cmd
+
+    @staticmethod
+    def _slack_escape(value) -> str:
+        """Escape the three characters Slack treats as control characters."""
+        return str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     @staticmethod
     def _scope_label(filter_siem: Optional[str], filter_client: Optional[str]) -> str:
