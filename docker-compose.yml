@@ -1,0 +1,24 @@
+# SIEM Pulse with Docker Compose
+#
+#   cp .env.example .env            # add credentials and DASHBOARD_TOKEN_ADMIN
+#   docker compose up -d
+#   open http://127.0.0.1:8080/?token=<DASHBOARD_TOKEN_ADMIN>
+#
+# The dashboard listens on all container interfaces, so it requires a token:
+# set DASHBOARD_TOKEN_ADMIN in .env (config.yaml -> dashboard.users).
+services:
+  siem-pulse:
+    build: .
+    image: siem-pulse:latest
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./config.yaml:/etc/siem-pulse/config.yaml:ro
+      - ./sample_devices.xlsx:/etc/siem-pulse/sample_devices.xlsx:ro
+      - siem-pulse-data:/data
+    command: ["--schedule", "--dashboard", "--host", "0.0.0.0"]
+
+volumes:
+  siem-pulse-data: {}

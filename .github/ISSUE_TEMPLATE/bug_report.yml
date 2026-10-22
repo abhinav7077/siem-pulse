@@ -1,0 +1,44 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! **Never paste credentials, tokens or real customer data** — redact device names and IPs if needed.
+        Security problems: please report privately via Security → Report a vulnerability.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you expected, and what happened instead.
+    validations: {required: true}
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to reproduce
+      description: Command, relevant (redacted) config.yaml section and inventory row.
+      render: shell
+    validations: {required: true}
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log output
+      description: Relevant lines from the console or soc_monitor.log (redacted).
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: SIEM Pulse version
+      description: Output of `siem-pulse --version`
+    validations: {required: true}
+  - type: dropdown
+    id: siem
+    attributes:
+      label: SIEM platform(s)
+      multiple: true
+      options: [qradar, splunk, sentinel, elastic, fortisiem, wazuh, sumologic, seceon, generic_rest, mock mode, other]
+  - type: input
+    id: siem-version
+    attributes:
+      label: SIEM product version (if relevant)

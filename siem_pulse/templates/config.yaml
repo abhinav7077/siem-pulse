@@ -1,0 +1,276 @@
+# ─────────────────────────────────────────────────────────────────
+# SOC Log Health Monitor — Configuration
+# ─────────────────────────────────────────────────────────────────
+# SECURITY: Never hardcode credentials here.
+# All secrets are read from environment variables (see .env.example)
+# ─────────────────────────────────────────────────────────────────
+
+# Device inventory
+devices:
+  source: file                  # file (.xlsx / .csv / .yaml) | servicenow
+  file: sample_devices.xlsx
+  sheet_name: Devices
+  # servicenow:                 # Used when source: servicenow (SERVICENOW_USER / SERVICENOW_PASS)
+  #   instance_url: "https://acme.service-now.com"
+  #   table: cmdb_ci
+  #   query: "operational_status=1^u_siem_platformISNOTEMPTY"
+  #   field_map: {device_name: name, ip_address: ip_address, siem_platform: u_siem_platform, client_name: company}
+  #   defaults: {siem_platform: qradar}
+
+# Where credentials come from
+secrets:
+  provider: env                 # env | vault | aws | azure
+  fallback_to_env: true         # Also check env vars when the provider has no value
+  # vault: {addr: "https://vault.example:8200", mount: secret, path_template: "siem-pulse/{tenant}"}   # VAULT_TOKEN
+  # aws:   {region: us-east-1, secret_id_template: "siem-pulse/{tenant}"}    # pip install boto3
+  # azure: {vault_url: "https://my-vault.vault.azure.net"}                   # pip install azure-identity azure-keyvault-secrets
+
+# Detection logic
+logic:
+  threshold_hours: 24           # Flag device if no logs in this many hours
+  # Per-criticality thresholds (inventory column `criticality`). A device's own
+  # `threshold_hours` column wins over these; devices without either use threshold_hours.
+  criticality_thresholds:
+    critical: 1
+    high: 4
+    medium: 24
+    low: 72
+
+# ── Performance (for large inventories) ────────────────────────────────────
+performance:
+  threads: 10                   # Parallel threads for SIEM API calls
+                                # Recommended ranges:
+                                #   Small  (<200 devices)  : 5-10
+                                #   Medium (200-1000)      : 10-20
+                                #   Large  (1000-2000+)    : 20-50
+                                # Do NOT exceed SIEM rate limits — check SIEM docs
+                                # Start low (10) and increase if stable
+
+# ── SIEM connection settings ────────────────────────────────────────────────
+siem:
+  max_retries: 3                # Only temporary errors are retried (timeouts, 5xx, 429)
+  retry_delay_seconds: 5        # Backoff base: 5s, 10s, 20s ...
+  max_retry_after_seconds: 300  # Cap on how long to honour a SIEM's Retry-After header
+  timeout_seconds: 30
+  mock_mode: true               # Set to false to use real SIEM APIs
+  # mock_seed: 42               # Same simulated results every run (demos, tests)
+
+  # Settings every SIEM section (and every tenant) accepts:
+  #   verify_ssl: true (default) | false | "/path/to/ca-bundle.pem"
+  #   max_concurrent_requests: 0     # Max parallel API calls per tenant (0 = no limit)
+  #   requests_per_second: 0         # Max request rate per tenant (0 = no limit)
+  #   inventory_cache_seconds: 300   # How long a bulk source list is reused
+  #
+  # Multi-client setups — two inventory columns pick the tenant for each device:
+  #   api_endpoint  overrides base_url for that device's SIEM
+  #   auth_ref      selects overrides from `tenants:` below AND prefixed credentials:
+  #                 auth_ref "acme" -> ACME_QRADAR_SEC_TOKEN, ACME_SECEON_API_KEY,
+  #                 ACME_FORTISIEM_USER / ACME_FORTISIEM_PASS
+  #   A tenant never falls back to the default credentials.
+
+  # Seceon aiSIEM / OTM — check your tenant's API docs for the exact path/fields
+  seceon:
+    base_url: "https://seceon-tenant.seceon.com/api/v2"
+    verify_ssl: true
+    last_log_path: "/devices/{ip}/lastlog"            # {ip} and {device_name} allowed
+    timestamp_fields: ["last_event_time", "lastEventTime"]  # dots for nested: "data.last_seen"
+    auth_header: "Authorization"
+    auth_scheme: "Bearer"
+    lookup: per_device              # per_device | bulk (one call per tenant, enables --reconcile)
+    # bulk_path: "/devices"         # Used only when lookup: bulk
+    # bulk_items_field: "items"
+    # bulk_ip_field: "ip"
+    # bulk_name_field: "name"
+    # Credentials loaded from env: SECEON_API_KEY
+
+  # IBM QRadar
+  qradar:
+    base_url: "https://qradar.yourdomain.com/api"
+    verify_ssl: false             # Set true (or a CA bundle path) in production
+    api_version: "14.0"
+    lookup: log_sources           # log_sources (recommended, one bulk call) | aql
+    inventory_cache_seconds: 300  # How long the log source list is reused
+    page_size: 500
+    # Used only when lookup: aql. Placeholders: {ip}, {device_name}
+    aql_template: "SELECT MAX(starttime) AS last_seen FROM events WHERE LOGSOURCENAME(logsourceid) = '{device_name}' LAST 3 DAYS"
+    search_poll_seconds: 2
+    search_timeout_seconds: 120
+    max_concurrent_requests: 5
+    # Credentials loaded from env: QRADAR_SEC_TOKEN
+    # tenants:                      # Per-client overrides, keyed by auth_ref
+    #   acme:
+    #     base_url: "https://qradar.acme.example/api"
+    #     verify_ssl: "/etc/ssl/acme-ca.pem"
+    #   globex:
+    #     base_url: "https://qradar.globex.example/api"
+    #     requests_per_second: 2
+
+  # FortiSIEM (base_url must end in /phoenix/rest)
+  fortisiem:
+    base_url: "https://fortisiem.yourdomain.com/phoenix/rest"
+    verify_ssl: true
+    query_window_hours: 72        # How far back to look for the newest event
+    query_poll_seconds: 2
+    query_timeout_seconds: 120
+    lookup: per_device            # per_device | grouped (one query per tenant, enables --reconcile)
+    page_size: 1000               # Rows per page when reading grouped results
+    # Credentials loaded from env: FORTISIEM_USER ("org/user" on multi-tenant), FORTISIEM_PASS
+
+  # ── More connectors (use these names in the inventory's siem_platform) ──
+  # Every connector below works in bulk (one query per tenant) and supports --reconcile.
+  # splunk:                       # SPLUNK_TOKEN (or SPLUNK_USER / SPLUNK_PASS)
+  #   base_url: "https://splunk.yourdomain.com:8089"
+  #   lookback_hours: 72
+  #   search: "| tstats latest(_time) as last_seen where index=* earliest=-{hours}h by host"
+  #
+  # sentinel:                     # SENTINEL_CLIENT_ID / SENTINEL_CLIENT_SECRET (Log Analytics Reader)
+  #   workspace_id: "00000000-0000-0000-0000-000000000000"
+  #   tenant_id: "11111111-1111-1111-1111-111111111111"
+  #   lookback_hours: 72
+  #
+  # elastic:                      # ELASTIC_API_KEY (or ELASTIC_USER / ELASTIC_PASS)
+  #   base_url: "https://elastic.yourdomain.com:9200"
+  #   index: "logs-*,filebeat-*,winlogbeat-*"
+  #   host_field: host.name
+  #   ip_field: host.ip
+  #
+  # wazuh:                        # WAZUH_USER / WAZUH_PASS (API user)
+  #   base_url: "https://wazuh.yourdomain.com:55000"
+  #
+  # sumologic:                    # SUMO_ACCESS_ID / SUMO_ACCESS_KEY
+  #   base_url: "https://api.sumologic.com/api"
+  #   query: "* | max(_receipttime) as last_seen by _sourcehost"
+  #
+  # generic_rest:                 # Any REST API that lists sources + last event time
+  #   base_url: "https://siem.yourdomain.com"
+  #   path: "/api/log-sources"
+  #   items_field: "data.items"
+  #   ip_field: ip
+  #   name_field: name
+  #   time_field: lastEventTime
+  #   auth: header                # header (GENERIC_REST_TOKEN) | basic (GENERIC_REST_USER/PASS) | none
+  #   pagination: offset
+
+# ── Alerting ────────────────────────────────────────────────────────────────
+alerting:
+  mode: changes                 # changes: alert on new / recovered only | every_run: every issue, every run
+  repeat_after_hours: 24        # Re-send still-open issues this often (0 = never)
+  notify_recovered: true
+
+  # The `email` and `slack` blocks below are the simple setup: when enabled they
+  # become channels named "email" and "slack" and receive every alert.
+  email:
+    enabled: true
+    smtp_server: "smtp.example.com"
+    port: 587
+    use_tls: true
+    sender: "soc-monitor@example.com"
+    # Password loaded from env: SMTP_PASSWORD
+    recipients:
+      - "analyst@example.com"
+      - "soc-team@example.com"
+    subject_prefix: "[SOC ALERT]"
+    # password_secret: SMTP_PASSWORD   # name of the secret holding the SMTP password
+
+  slack:
+    enabled: false
+    # Webhook URL loaded from env: SLACK_WEBHOOK_URL
+
+  # ── Advanced: named channels + routes ───────────────────────────────────
+  # channels:
+  #   acme_email: {type: email, smtp_server: smtp.example.com, sender: soc@example.com,
+  #                recipients: [acme-it@example.com]}
+  #   soc_teams:  {type: teams, webhook_secret: TEAMS_WEBHOOK_URL, default: true}
+  #   oncall:     {type: pagerduty, routing_key_secret: PAGERDUTY_ROUTING_KEY}
+  #   opsgenie:   {type: opsgenie, api_key_secret: OPSGENIE_API_KEY}
+  #   tickets:    {type: servicenow, instance_url: "https://acme.service-now.com", assignment_group: SOC}
+  #   jira:       {type: jira, base_url: "https://acme.atlassian.net", project_key: SOC,
+  #                resolve_transition_id: "31"}    # JIRA_EMAIL + JIRA_API_TOKEN
+  #   soar:       {type: webhook, url: "https://soar.example/hooks/siem-pulse", hmac_secret: SOAR_HMAC_KEY}
+  #
+  # default_channels: [email, soc_teams]    # devices that match no route
+  # routes:                                 # first match wins unless continue: true
+  #   - match: {criticality: critical}
+  #     channels: [oncall]
+  #     continue: true
+  #   - match: {client_name: "Acme Corp"}
+  #     channels: [acme_email, tickets]
+  #
+  # digest:                                 # daily summary of everything still open
+  #   enabled: true
+  #   time: "08:00"
+  #   timezone: "Europe/London"
+  #   channels: [email]
+
+# ── Maintenance windows (no alerts while active; devices still checked) ─────
+# maintenance_windows:
+#   - name: "Acme patch night"
+#     match: {client_name: "Acme Corp"}
+#     weekly: {days: [sat], start: "22:00", end: "04:00", timezone: "Europe/London"}
+#   - name: "DC migration"
+#     match: {device_name: "dc-*"}
+#     start: "2026-11-02T18:00:00Z"
+#     end: "2026-11-03T06:00:00Z"
+
+# ── Deeper detection: "alive but broken" log sources ────────────────────────
+# Needs QRadar, Splunk, Elastic, Sentinel or FortiSIEM (lookup: grouped).
+# Costs one extra query per SIEM tenant per run.
+detection:
+  enabled: false
+  window_hours: 1               # activity window measured each run
+  baseline_days: 7
+  min_samples: 12               # history needed before volume drops are judged
+  drop_ratio: 0.2               # alert below 20% of the median events/hour
+  unparsed_ratio: 0.2           # alert when >20% of events are unparsed
+  max_clock_skew_minutes: 15
+  findings_status: degraded     # degraded (alerts) | healthy (report only)
+
+# ── MITRE ATT&CK coverage (inventory column device_type) ────────────────────
+# attack:
+#   device_types:               # add or override device type -> data sources
+#     nac: ["Network Traffic", "Logon Session"]
+
+# ── Run history (state-aware alerts, digests, dashboard) ────────────────────
+state:
+  path: siem_pulse.db
+  keep_days: 90
+
+# ── Reports ─────────────────────────────────────────────────────────────────
+reporting:
+  output_dir: "reports"
+  csv_filename_prefix: "soc_log_report"
+  include_healthy_in_report: true
+
+# ── Scheduler (used with --schedule flag) ───────────────────────────────────
+scheduler:
+  interval_minutes: 60
+
+# ── Dashboard (siem-pulse --dashboard) ──────────────────────────────────────
+dashboard:
+  host: 127.0.0.1               # use 0.0.0.0 (or --host) to expose it — then users are required
+  port: 8080
+  users:                        # token per user; clients: "*" or a list of client names
+    - name: admin
+      token_secret: DASHBOARD_TOKEN_ADMIN
+      clients: "*"
+    # - name: acme
+    #   token_secret: DASHBOARD_TOKEN_ACME
+    #   clients: ["Acme Corp"]
+  allow_anonymous: false
+  metrics_public: false         # true: Prometheus can scrape /metrics without a token
+
+# ── Operations ──────────────────────────────────────────────────────────────
+heartbeat:
+  ping_url: ""                  # e.g. https://hc-ping.com/<uuid>, pinged after every run
+  ping_on_failure: true
+  # max_age_minutes: 125        # /healthz and --check-heartbeat (default 2 x interval + 5)
+
+metrics:
+  textfile: ""                  # e.g. /var/lib/node_exporter/textfile/siem_pulse.prom
+  per_device: true
+
+# ── Logging ─────────────────────────────────────────────────────────────────
+logging:
+  level: INFO                   # DEBUG | INFO | WARNING | ERROR
+  file: "soc_monitor.log"
+  format: text                  # text | json (one JSON object per line)

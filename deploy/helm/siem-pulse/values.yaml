@@ -1,0 +1,63 @@
+image:
+  repository: ghcr.io/abhinav7077/siem-pulse
+  tag: ""            # defaults to the chart appVersion
+  pullPolicy: IfNotPresent
+
+# Name of an existing Secret whose keys become environment variables
+# (QRADAR_SEC_TOKEN, SMTP_PASSWORD, DASHBOARD_TOKEN_ADMIN, ...).
+# kubectl create secret generic siem-pulse-secrets --from-env-file=.env
+existingSecret: siem-pulse-secrets
+
+# config.yaml for SIEM Pulse (see the repository's config.yaml for every option).
+config:
+  devices:
+    file: devices.yaml
+  siem:
+    mock_mode: true
+  scheduler:
+    interval_minutes: 60
+  state:
+    path: /data/siem_pulse.db
+  reporting:
+    output_dir: /data/reports
+  logging:
+    level: INFO
+    file: ""
+    format: json
+  dashboard:
+    users:
+      - name: admin
+        token_secret: DASHBOARD_TOKEN_ADMIN
+        clients: "*"
+    metrics_public: false
+
+# Device inventory rendered to devices.yaml (or use devices.source: servicenow in config).
+inventory:
+  devices:
+    - {device_name: fw-edge-01, ip_address: 10.0.0.1, siem_platform: qradar, client_name: Example, criticality: critical, device_type: firewall}
+
+persistence:
+  enabled: true
+  size: 1Gi
+  storageClass: ""
+  accessMode: ReadWriteOnce
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: siem-pulse.example.com
+  tls: []
+
+resources:
+  requests: {cpu: 100m, memory: 256Mi}
+  limits: {memory: 1Gi}
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

@@ -1,0 +1,66 @@
+# Plain Kubernetes example: one check per hour as a CronJob, history on a PVC.
+# For the dashboard and Prometheus metrics use the Helm chart (deploy/helm),
+# which runs checks and dashboard in one pod.
+#
+#   kubectl create namespace siem-pulse
+#   kubectl -n siem-pulse create secret generic siem-pulse-secrets --from-env-file=.env
+#   kubectl -n siem-pulse create configmap siem-pulse-config \
+#       --from-file=config.yaml --from-file=sample_devices.xlsx
+#   kubectl -n siem-pulse apply -f deploy/kubernetes/cronjob.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: siem-pulse-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: siem-pulse
+spec:
+  schedule: "7 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            fsGroup: 10001
+          containers:
+            - name: siem-pulse
+              image: ghcr.io/abhinav7077/siem-pulse:latest
+              args: ["--threads", "10"]       # no --schedule: one check cycle, then exit
+              envFrom:
+                - secretRef:
+                    name: siem-pulse-secrets
+              volumeMounts:
+                - name: config
+                  mountPath: /etc/siem-pulse
+                  readOnly: true
+                - name: data
+                  mountPath: /data
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests: {cpu: 100m, memory: 256Mi}
+                limits: {memory: 1Gi}
+          volumes:
+            - name: config
+              configMap:
+                name: siem-pulse-config
+            - name: data
+              persistentVolumeClaim:
+                claimName: siem-pulse-data

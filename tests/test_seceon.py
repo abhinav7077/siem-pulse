@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from modules.siem_clients.base_client import NonRetryableError
-from modules.siem_clients.seceon_client import SeceonClient
+from siem_pulse.siem_clients.base_client import NonRetryableError
+from siem_pulse.siem_clients.seceon_client import SeceonClient
 from tests.conftest import FakeResponse
 
 DEVICE = {"device_name": "web-01", "ip_address": "10.10.1.10"}

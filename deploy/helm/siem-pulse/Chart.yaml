@@ -1,0 +1,12 @@
+apiVersion: v2
+name: siem-pulse
+description: Log source health monitor for SOC and MSSP teams (checks + dashboard + Prometheus metrics)
+type: application
+version: 0.2.0
+appVersion: "0.2.0"
+home: https://github.com/abhinav7077/siem-pulse
+sources:
+  - https://github.com/abhinav7077/siem-pulse
+keywords: [siem, soc, log-monitoring, qradar, splunk, sentinel, security]
+annotations:
+  artifacthub.io/license: Apache-2.0

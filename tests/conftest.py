@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from modules.siem_clients import base_client  # noqa: E402
+from siem_pulse.siem_clients import base_client  # noqa: E402
 
 
 class FakeResponse:
@@ -58,7 +58,10 @@ class FakeHTTP:
 @pytest.fixture
 def http(monkeypatch):
     fake = FakeHTTP()
-    monkeypatch.setattr(base_client.requests, "request", fake)
+    monkeypatch.setattr(
+        base_client.requests.Session, "request",
+        lambda self, method, url, **kwargs: fake(method, url, **kwargs),
+    )
     return fake
 
 

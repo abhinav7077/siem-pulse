@@ -1,0 +1,23 @@
+name: New SIEM connector or alert channel
+description: Ask for (or offer to build) support for another platform
+labels: [connector, good first issue]
+body:
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: e.g. Graylog, Google SecOps, LogRhythm, Mattermost
+    validations: {required: true}
+  - type: textarea
+    id: api
+    attributes:
+      label: How can it report a source's last event time?
+      description: API endpoint or query, authentication, and a link to the API docs.
+    validations: {required: true}
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Contribution
+      options:
+        - label: I can test against a real instance
+        - label: I would like to build it (see docs/plugins.md and CONTRIBUTING.md)

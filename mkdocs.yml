@@ -1,0 +1,66 @@
+site_name: SIEM Pulse
+site_description: Open-source SIEM log source health monitor — detect devices that stopped sending logs to QRadar, Splunk, Microsoft Sentinel, Elastic, FortiSIEM, Wazuh and more.
+site_url: https://abhinav7077.github.io/siem-pulse/
+repo_url: https://github.com/abhinav7077/siem-pulse
+repo_name: abhinav7077/siem-pulse
+edit_uri: edit/main/docs/
+copyright: Copyright 2026 The SIEM Pulse Authors — Apache License 2.0
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle: {icon: material/brightness-7, name: Dark mode}
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle: {icon: material/brightness-4, name: Light mode}
+  icon:
+    logo: material/pulse
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc: {permalink: true}
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Inventory: inventory.md
+  - SIEMs:
+      - Overview: siems/index.md
+      - IBM QRadar: siems/qradar.md
+      - Splunk: siems/splunk.md
+      - Microsoft Sentinel: siems/sentinel.md
+      - Elastic / OpenSearch: siems/elastic.md
+      - FortiSIEM: siems/fortisiem.md
+      - Wazuh: siems/wazuh.md
+      - Sumo Logic: siems/sumologic.md
+      - Seceon: siems/seceon.md
+      - Generic REST: siems/generic-rest.md
+  - Alerting: alerting.md
+  - Deeper detection & ATT&CK: detection.md
+  - Multi-client & secrets: multi-tenant.md
+  - Dashboard & metrics: dashboard.md
+  - Deployment: deployment.md
+  - Plugins: plugins.md
+  - Troubleshooting: troubleshooting.md
+  - Blog:
+      - Detecting silent log sources: blog/detecting-silent-log-sources.md
+  - Roadmap: roadmap.md
+  - Changelog: changelog.md

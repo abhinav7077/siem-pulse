@@ -21,8 +21,64 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest
+        run: pip install -r requirements.txt pytest ruff
+      - name: Lint
+        run: ruff check .
       - name: Run tests
         run: python -m pytest -q
       - name: Smoke test (mock mode)
-        run: python main.py --dry-run && python main.py
+        run: |
+          python main.py --dry-run
+          python main.py
+          python main.py --reconcile
+          python main.py --check-heartbeat
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist and wheel
+        run: |
+          pip install build twine
+          python -m build
+          twine check --strict dist/*
+      - name: Install the wheel and run it
+        run: |
+          pip install dist/*.whl
+          cd "$(mktemp -d)" && siem-pulse --version
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t siem-pulse:ci .
+      - name: Run one check in the image
+        run: docker run --rm --read-only -v siem-pulse-ci:/data siem-pulse:ci --threads 4
+
+  deploy-manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Helm lint and render
+        run: |
+          helm lint deploy/helm/siem-pulse
+          helm template siem-pulse deploy/helm/siem-pulse --set ingress.enabled=true > rendered.yaml
+      - name: Validate Kubernetes schemas
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz
+          ./kubeconform -strict -summary rendered.yaml deploy/kubernetes/cronjob.yaml
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r docs/requirements.txt
+      - run: mkdocs build --strict

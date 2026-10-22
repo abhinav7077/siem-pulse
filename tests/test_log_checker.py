@@ -2,9 +2,9 @@
 # Copyright 2026 The SIEM Pulse Authors
 from datetime import datetime, timedelta, timezone
 
-from modules import log_checker
-from modules.log_checker import LogChecker
-from modules.siem_clients.base_client import (
+from siem_pulse import log_checker
+from siem_pulse.log_checker import LogChecker
+from siem_pulse.siem_clients.base_client import (
     NonRetryableError,
     RateLimitedError,
     RetryableError,

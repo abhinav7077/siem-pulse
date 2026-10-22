@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use SIEM Pulse in research or a publication, please cite it as below."
+title: "SIEM Pulse: open-source log source health monitor for SOC and MSSP teams"
+type: software
+authors:
+  - name: "The SIEM Pulse Authors"
+repository-code: "https://github.com/abhinav7077/siem-pulse"
+url: "https://abhinav7077.github.io/siem-pulse/"
+license: Apache-2.0
+version: 0.2.0
+date-released: "2026-10-22"
+keywords:
+  - SIEM
+  - SOC
+  - MSSP
+  - log monitoring
+  - log source health
+  - security monitoring
+  - MITRE ATT&CK

@@ -1,0 +1,9 @@
+[Unit]
+Description=SIEM Pulse self-check every 15 minutes
+
+[Timer]
+OnBootSec=20min
+OnUnitActiveSec=15min
+
+[Install]
+WantedBy=timers.target
