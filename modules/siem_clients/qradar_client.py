@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The SIEM Pulse Authors
 """
 qradar_client.py
 ================
