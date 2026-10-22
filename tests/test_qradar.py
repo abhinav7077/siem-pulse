@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from modules.siem_clients.base_client import NonRetryableError
-from modules.siem_clients.qradar_client import QRadarClient
+from siem_pulse.siem_clients.base_client import NonRetryableError
+from siem_pulse.siem_clients.qradar_client import QRadarClient
 from tests.conftest import FakeResponse
 
 MS = 1_760_000_000_000  # epoch milliseconds

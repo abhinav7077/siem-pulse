@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from modules.siem_clients import base_client  # noqa: E402
+from siem_pulse.siem_clients import base_client  # noqa: E402
 
 
 class FakeResponse:

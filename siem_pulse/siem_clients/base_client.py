@@ -27,6 +27,7 @@ Tenants (multi-client setups):
 import ipaddress
 import logging
 import os
+import random
 import re
 import threading
 import time
@@ -87,7 +88,7 @@ def validate_ip(value: str) -> str:
     try:
         return str(ipaddress.ip_address(str(value).strip()))
     except ValueError:
-        raise NonRetryableError(f"Invalid IP address: {value!r}")
+        raise NonRetryableError(f"Invalid IP address: {value!r}") from None
 
 
 def epoch_to_datetime(value: Union[int, float, str]) -> datetime:
@@ -154,6 +155,7 @@ class BaseSIEMClient(ABC):
         siem_cfg = config.get("siem", {})
         self.timeout = siem_cfg.get("timeout_seconds", 30)
         self.mock_mode = siem_cfg.get("mock_mode", True)
+        self.mock_seed = siem_cfg.get("mock_seed")
 
         # Platform settings, then tenant overrides, then the inventory endpoint
         platform_cfg = dict(siem_cfg.get(self.config_key, {}) or {})
@@ -188,6 +190,16 @@ class BaseSIEMClient(ABC):
         self._inventory_error: Optional[NonRetryableError] = None
 
         self._missing_credentials: List[str] = []
+
+    def _mock_rng(self, device: Dict[str, Any]):
+        """
+        Random source for mock responses. With siem.mock_seed set, each device
+        gets the same simulated result on every run (repeatable demos/tests).
+        """
+        if self.mock_seed is None:
+            return random
+        key = f"{self.mock_seed}|{self.config_key}|{device.get('device_name')}|{device.get('ip_address')}"
+        return random.Random(key)
 
     @property
     def tenant_label(self) -> str:

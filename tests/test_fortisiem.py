@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from modules.siem_clients.base_client import NonRetryableError
-from modules.siem_clients.fortisiem_client import FortiSIEMClient, parse_fortisiem_time
+from siem_pulse.siem_clients.base_client import NonRetryableError
+from siem_pulse.siem_clients.fortisiem_client import FortiSIEMClient, parse_fortisiem_time
 from tests.conftest import FakeResponse
 
 DEVICE = {"device_name": "fw-01", "ip_address": "172.16.5.1"}

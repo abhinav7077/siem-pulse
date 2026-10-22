@@ -8,15 +8,15 @@ from datetime import datetime, timezone
 
 import pytest
 
-from modules.excel_reader import ExcelReader
-from modules.log_checker import LogChecker
-from modules.reconciler import reconcile
-from modules.siem_clients import base_client
-from modules.siem_clients.base_client import NonRetryableError, RateLimiter, env_prefix
-from modules.siem_clients.factory import SIEMClientFactory
-from modules.siem_clients.fortisiem_client import FortiSIEMClient
-from modules.siem_clients.qradar_client import QRadarClient
-from modules.siem_clients.seceon_client import SeceonClient
+from siem_pulse.excel_reader import ExcelReader
+from siem_pulse.log_checker import LogChecker
+from siem_pulse.reconciler import reconcile
+from siem_pulse.siem_clients import base_client
+from siem_pulse.siem_clients.base_client import NonRetryableError, RateLimiter, env_prefix
+from siem_pulse.siem_clients.factory import SIEMClientFactory
+from siem_pulse.siem_clients.fortisiem_client import FortiSIEMClient
+from siem_pulse.siem_clients.qradar_client import QRadarClient
+from siem_pulse.siem_clients.seceon_client import SeceonClient
 from tests.conftest import FakeResponse
 
 MS = 1_760_000_000_000

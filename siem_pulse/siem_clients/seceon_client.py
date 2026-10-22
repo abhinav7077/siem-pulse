@@ -38,7 +38,6 @@ Mock mode:
     without connecting to a real Seceon instance (useful for testing/demo).
 """
 
-import random
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
@@ -69,7 +68,7 @@ def _to_datetime(value: Any) -> datetime:
     try:
         parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
     except ValueError:
-        raise NonRetryableError(f"Unrecognised Seceon timestamp: {value!r}")
+        raise NonRetryableError(f"Unrecognised Seceon timestamp: {value!r}") from None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
@@ -163,6 +162,7 @@ class SeceonClient(BaseSIEMClient):
         ~70% of devices are healthy, 30% are stale.
         """
         now = datetime.now(tz=timezone.utc)
-        if random.random() < 0.70:
-            return now - timedelta(hours=random.uniform(0.5, 20))
-        return now - timedelta(hours=random.uniform(25, 72))
+        rng = self._mock_rng(device)
+        if rng.random() < 0.70:
+            return now - timedelta(hours=rng.uniform(0.5, 20))
+        return now - timedelta(hours=rng.uniform(25, 72))

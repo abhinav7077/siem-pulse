@@ -31,7 +31,6 @@ Mock mode:
     Set `siem.mock_mode: true` in config.yaml to return simulated responses.
 """
 
-import random
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -225,6 +224,7 @@ class QRadarClient(BaseSIEMClient):
         ~65% healthy, 35% stale.
         """
         now = datetime.now(tz=timezone.utc)
-        if random.random() < 0.65:
-            return now - timedelta(hours=random.uniform(0.1, 22))
-        return now - timedelta(hours=random.uniform(25, 96))
+        rng = self._mock_rng(device)
+        if rng.random() < 0.65:
+            return now - timedelta(hours=rng.uniform(0.1, 22))
+        return now - timedelta(hours=rng.uniform(25, 96))

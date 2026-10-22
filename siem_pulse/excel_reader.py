@@ -63,7 +63,7 @@ class ExcelReader:
         try:
             df = self._read_frame()
         except Exception as e:
-            raise ValueError(f"Failed to read inventory file '{self.file_path}': {e}")
+            raise ValueError(f"Failed to read inventory file '{self.file_path}': {e}") from e
 
         # Normalize column names: strip whitespace, lowercase
         df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]

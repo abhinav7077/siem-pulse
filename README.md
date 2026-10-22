@@ -37,23 +37,23 @@ A device that stops logging is a blind spot: attacks on it go undetected. SIEM P
 
 ```
 siem-pulse/
-├── main.py                        # Entry point
+├── main.py                        # Run from a checkout: python main.py
 ├── config.yaml                    # Configuration (no secrets)
 ├── .env.example                   # Environment variable template
 ├── requirements.txt               # Python dependencies
 ├── sample_devices.xlsx            # Example device inventory
-├── reports/                       # CSV reports saved here (auto-created)
-├── soc_monitor.log                # Log file (auto-created)
-└── modules/
-    ├── excel_reader.py            # Reads and validates device inventory
+├── tests/                         # pytest suite (no network needed)
+└── siem_pulse/
+    ├── cli.py                     # Command line interface (siem-pulse)
+    ├── excel_reader.py            # Reads and validates the inventory (xlsx/csv/yaml)
     ├── log_checker.py             # Checks last log time per device
-    ├── report_generator.py        # Generates console + CSV reports
-    ├── alerting.py                # Email + Slack alerts
+    ├── report_generator.py        # Console + CSV reports
+    ├── alerting.py                # Alert dispatch
     ├── reconciler.py              # Inventory vs. SIEM source comparison
     └── siem_clients/
-        ├── base_client.py         # Abstract base for all SIEM clients
-        ├── factory.py             # Instantiates the right client per device
-        ├── seceon_client.py       # Seceon OTM API client
+        ├── base_client.py         # Shared HTTP, tenants, credentials, limits
+        ├── factory.py             # One client per tenant
+        ├── seceon_client.py       # Seceon API client
         ├── qradar_client.py       # IBM QRadar API client
         └── fortisiem_client.py    # FortiSIEM API client
 ```
@@ -92,13 +92,7 @@ SMTP_PASSWORD=your_smtp_password
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 ```
 
-Load the `.env` file before running:
-```bash
-# Linux/Mac
-export $(cat .env | xargs)
-
-# Automatic .env loading (python-dotenv) is planned — see ROADMAP.md
-```
+The `.env` file in the current directory is loaded automatically (use `--env-file` for another path). Variables already set in your environment take priority.
 
 ### 4. Populate your device inventory
 

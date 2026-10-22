@@ -31,6 +31,7 @@ siem:
   max_retry_after_seconds: 300  # Cap on how long to honour a SIEM's Retry-After header
   timeout_seconds: 30
   mock_mode: true               # Set to false to use real SIEM APIs
+  # mock_seed: 42               # Same simulated results every run (demos, tests)
 
   # Settings every SIEM section (and every tenant) accepts:
   #   verify_ssl: true (default) | false | "/path/to/ca-bundle.pem"

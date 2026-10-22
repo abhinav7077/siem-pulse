@@ -40,7 +40,7 @@ def reconcile(devices: List[Dict[str, Any]], config: dict) -> Dict[str, Any]:
 
     result = {"unlisted": [], "not_found": [], "skipped": [], "errors": []}
 
-    for key, tenant_devices in sorted(groups.items()):
+    for _key, tenant_devices in sorted(groups.items()):
         client = SIEMClientFactory.get_client_for_device(tenant_devices[0], config)
         tenant = client.tenant_label
         clients = ", ".join(sorted({d.get("client_name") or "N/A" for d in tenant_devices}))

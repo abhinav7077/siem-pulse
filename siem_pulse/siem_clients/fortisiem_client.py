@@ -32,7 +32,6 @@ Mock mode:
     Set `siem.mock_mode: true` in config.yaml to return simulated responses.
 """
 
-import random
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
@@ -212,7 +211,7 @@ class FortiSIEMClient(BaseSIEMClient):
                 raise NonRetryableError(
                     f"Unexpected FortiSIEM progress response for query {query_id}: "
                     f"{response.text[:200]!r}"
-                )
+                ) from None
             if progress >= 100:
                 return
             if time.monotonic() >= deadline:
@@ -226,7 +225,7 @@ class FortiSIEMClient(BaseSIEMClient):
         try:
             root = ET.fromstring(xml_text)
         except ET.ParseError as e:
-            raise NonRetryableError(f"FortiSIEM returned invalid XML for {label}: {e}")
+            raise NonRetryableError(f"FortiSIEM returned invalid XML for {label}: {e}") from e
         error = root.find(".//error")
         if error is not None:
             description = error.find("description")
@@ -303,6 +302,7 @@ class FortiSIEMClient(BaseSIEMClient):
         ~75% healthy, 25% stale.
         """
         now = datetime.now(tz=timezone.utc)
-        if random.random() < 0.75:
-            return now - timedelta(hours=random.uniform(0.2, 23))
-        return now - timedelta(hours=random.uniform(26, 80))
+        rng = self._mock_rng(device)
+        if rng.random() < 0.75:
+            return now - timedelta(hours=rng.uniform(0.2, 23))
+        return now - timedelta(hours=rng.uniform(26, 80))

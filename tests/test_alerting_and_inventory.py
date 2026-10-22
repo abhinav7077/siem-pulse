@@ -2,9 +2,9 @@
 # Copyright 2026 The SIEM Pulse Authors
 from pathlib import Path
 
-from modules.alerting import AlertManager
-from modules.excel_reader import SUPPORTED_SIEMS, ExcelReader
-from modules.siem_clients.factory import SIEM_REGISTRY
+from siem_pulse.alerting import AlertManager
+from siem_pulse.excel_reader import SUPPORTED_SIEMS, ExcelReader
+from siem_pulse.siem_clients.factory import SIEM_REGISTRY
 
 ROOT = Path(__file__).resolve().parent.parent
 

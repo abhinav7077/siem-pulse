@@ -35,9 +35,9 @@ on GitHub and search engines.
 - [ ] Add a social preview image (GitHub → Settings → Social preview)
 - [x] Unit tests with `pytest` (mocked HTTP per SIEM)
 - [x] GitHub Actions CI: tests + mock-mode smoke run, Python 3.10–3.13 matrix
-- [ ] Add a linter (`ruff`) to CI
-- [ ] Load `.env` automatically with `python-dotenv`
-- [ ] Make mock mode deterministic (`mock_seed` in config) so demos and tests repeat
+- [x] Add a linter (`ruff`) to CI
+- [x] Load `.env` automatically with `python-dotenv`
+- [x] Make mock mode deterministic (`mock_seed` in config) so demos and tests repeat
 
 **Exit check:** CI is green on every push and the repo shows up when searching
 GitHub for "SIEM log source monitoring".

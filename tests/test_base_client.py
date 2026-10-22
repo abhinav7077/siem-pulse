@@ -3,7 +3,7 @@
 import pytest
 import requests
 
-from modules.siem_clients.base_client import (
+from siem_pulse.siem_clients.base_client import (
     NonRetryableError,
     RateLimitedError,
     RetryableError,
@@ -11,7 +11,7 @@ from modules.siem_clients.base_client import (
     parse_retry_after,
     validate_ip,
 )
-from modules.siem_clients.qradar_client import QRadarClient
+from siem_pulse.siem_clients.qradar_client import QRadarClient
 from tests.conftest import FakeResponse
 
 

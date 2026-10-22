@@ -133,8 +133,8 @@ class AlertManager:
         def rows(devices: List[Dict], row_class: str, last_col_key: str) -> str:
             if not devices:
                 return (
-                    f'<tr><td colspan="5" style="text-align:center;color:#888;">'
-                    f'None</td></tr>'
+                    '<tr><td colspan="5" style="text-align:center;color:#888;">'
+                    'None</td></tr>'
                 )
             return "".join(
                 f"""<tr class="{row_class}">

@@ -3,4 +3,10 @@
 reports/
 __pycache__/
 *.pyc
-.streamlit/
+.streamlit/.ruff_cache/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+*.db
+site/
