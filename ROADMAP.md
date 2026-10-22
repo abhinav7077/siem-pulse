@@ -143,12 +143,14 @@ an alert within one run.
 **Goal:** work with the tools SOC teams already use.
 
 ### SIEM connectors
-- [ ] Splunk (REST search / `metadata` command)
-- [ ] Microsoft Sentinel (Log Analytics `Heartbeat` / `_IsBillable` queries)
-- [ ] Elastic Security (`_search` max `@timestamp` per host)
-- [ ] Wazuh (agents API `lastKeepAlive`)
-- [ ] Google SecOps (Chronicle), LogRhythm, ArcSight, Sumo Logic
-- [ ] Plugin entry points so third-party connectors install with `pip`
+- [x] Splunk (REST export search with `tstats`)
+- [x] Microsoft Sentinel (Log Analytics query API, KQL over common tables)
+- [x] Elastic / OpenSearch (composite aggregation, max `@timestamp` per host)
+- [x] Wazuh (agents API `lastKeepAlive`)
+- [x] Sumo Logic (search job API)
+- [x] Generic REST connector (configurable path, fields, auth, paging) with a LogRhythm recipe
+- [ ] Dedicated Google SecOps (Chronicle), LogRhythm and ArcSight connectors (use `generic_rest` until then)
+- [x] Plugin entry points so third-party connectors and channels install with `pip`
 
 ### Alert channels and ticketing
 - [x] Microsoft Teams webhook

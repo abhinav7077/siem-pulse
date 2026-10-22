@@ -116,18 +116,40 @@ siem:
     page_size: 1000               # Rows per page when reading grouped results
     # Credentials loaded from env: FORTISIEM_USER ("org/user" on multi-tenant), FORTISIEM_PASS
 
-  # ── Add more SIEMs below as needed ────────────────────────────
-  # splunk:
+  # ── More connectors (use these names in the inventory's siem_platform) ──
+  # Every connector below works in bulk (one query per tenant) and supports --reconcile.
+  # splunk:                       # SPLUNK_TOKEN (or SPLUNK_USER / SPLUNK_PASS)
   #   base_url: "https://splunk.yourdomain.com:8089"
-  #   Credentials loaded from env: SPLUNK_TOKEN
+  #   lookback_hours: 72
+  #   search: "| tstats latest(_time) as last_seen where index=* earliest=-{hours}h by host"
   #
-  # sentinel:
-  #   workspace_id: "your-workspace-id"
-  #   Credentials loaded from env: SENTINEL_CLIENT_ID, SENTINEL_CLIENT_SECRET
+  # sentinel:                     # SENTINEL_CLIENT_ID / SENTINEL_CLIENT_SECRET (Log Analytics Reader)
+  #   workspace_id: "00000000-0000-0000-0000-000000000000"
+  #   tenant_id: "11111111-1111-1111-1111-111111111111"
+  #   lookback_hours: 72
   #
-  # elastic:
+  # elastic:                      # ELASTIC_API_KEY (or ELASTIC_USER / ELASTIC_PASS)
   #   base_url: "https://elastic.yourdomain.com:9200"
-  #   Credentials loaded from env: ELASTIC_API_KEY
+  #   index: "logs-*,filebeat-*,winlogbeat-*"
+  #   host_field: host.name
+  #   ip_field: host.ip
+  #
+  # wazuh:                        # WAZUH_USER / WAZUH_PASS (API user)
+  #   base_url: "https://wazuh.yourdomain.com:55000"
+  #
+  # sumologic:                    # SUMO_ACCESS_ID / SUMO_ACCESS_KEY
+  #   base_url: "https://api.sumologic.com/api"
+  #   query: "* | max(_receipttime) as last_seen by _sourcehost"
+  #
+  # generic_rest:                 # Any REST API that lists sources + last event time
+  #   base_url: "https://siem.yourdomain.com"
+  #   path: "/api/log-sources"
+  #   items_field: "data.items"
+  #   ip_field: ip
+  #   name_field: name
+  #   time_field: lastEventTime
+  #   auth: header                # header (GENERIC_REST_TOKEN) | basic (GENERIC_REST_USER/PASS) | none
+  #   pagination: offset
 
 # ── Alerting ────────────────────────────────────────────────────────────────
 alerting:

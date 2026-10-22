@@ -101,6 +101,39 @@ def epoch_to_datetime(value: Union[int, float, str]) -> datetime:
 
 
 
+def parse_timestamp(value: Any) -> Optional[datetime]:
+    """
+    Parse the timestamp shapes SIEM APIs return: epoch seconds or milliseconds
+    (number or numeric string), ISO 8601 (with Z or offset). None for blanks.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        return epoch_to_datetime(value) if value > 0 else None
+    text = str(value).strip()
+    if text.replace(".", "", 1).isdigit():
+        return epoch_to_datetime(text) if float(text) > 0 else None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        raise NonRetryableError(f"Unrecognised timestamp: {text!r}") from None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def dig(data: Any, dotted: str) -> Any:
+    """Read a nested field like 'data.items' or 'host.name' (returns None when missing)."""
+    if not dotted:
+        return data
+    for part in dotted.split("."):
+        if isinstance(data, dict):
+            data = data.get(part)
+        elif isinstance(data, list) and part.isdigit() and int(part) < len(data):
+            data = data[int(part)]
+        else:
+            return None
+    return data
+
+
 class RateLimiter:
     """Thread-safe limiter: at most `rate` requests per second (0 = unlimited)."""
 
@@ -222,6 +255,15 @@ class BaseSIEMClient(ABC):
             self._missing_credentials.append(where)
             self.logger.warning(f"Credential not set: {where}")
         return value
+
+    def optional_credential(self, name: str) -> str:
+        """Like credential(), but a missing value is not an error (for either/or auth)."""
+        if self.mock_mode:
+            return ""
+        try:
+            return get_resolver(self.config).get(name, self.auth_ref) or ""
+        except SecretError:
+            return ""
 
     def _require_credentials(self):
         """Refuse to call a tenant's API without that tenant's credentials."""
@@ -388,3 +430,30 @@ class BaseSIEMClient(ABC):
             return response.json()
         except ValueError as e:
             raise NonRetryableError(f"{name} returned a non-JSON response") from e
+
+
+class InventoryClient(BaseSIEMClient):
+    """
+    Base for connectors that always work in bulk: one query lists every
+    source with its last event time, and devices are matched locally.
+    Subclasses implement `_fetch_inventory()`.
+    """
+
+    supports_inventory = True
+
+    def get_last_log_time(self, device: Dict[str, Any]) -> Optional[datetime]:
+        if self.mock_mode:
+            return self._mock_response(device)
+        return self.last_seen_from_inventory(device)
+
+    def _mock_response(self, device: Dict[str, Any]) -> Optional[datetime]:
+        """~70% healthy, 30% stale."""
+        from datetime import timedelta
+        now = datetime.now(tz=timezone.utc)
+        rng = self._mock_rng(device)
+        if rng.random() < 0.70:
+            return now - timedelta(hours=rng.uniform(0.2, 20))
+        return now - timedelta(hours=rng.uniform(25, 90))
+
+    def _window_hours(self) -> float:
+        return float(self.platform_cfg.get("lookback_hours", 72))

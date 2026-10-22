@@ -1,12 +1,12 @@
-# SIEM Pulse — Log Source Health Monitor for QRadar, FortiSIEM & Seceon
+# SIEM Pulse — Log Source Health Monitor for QRadar, Splunk, Sentinel, Elastic, FortiSIEM & more
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/abhinav7077/siem-pulse/actions/workflows/ci.yml/badge.svg)](https://github.com/abhinav7077/siem-pulse/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![SIEM: QRadar | FortiSIEM | Seceon](https://img.shields.io/badge/SIEM-QRadar%20%7C%20FortiSIEM%20%7C%20Seceon-informational.svg)](#connecting-to-real-siem-apis)
+[![SIEMs: 9 connectors](https://img.shields.io/badge/SIEM-QRadar%20%7C%20Splunk%20%7C%20Sentinel%20%7C%20Elastic%20%7C%20FortiSIEM%20%7C%20Wazuh-informational.svg)](#supported-siems)
 [![Roadmap](https://img.shields.io/badge/roadmap-phases-success.svg)](ROADMAP.md)
 
-**SIEM Pulse** is an open-source Python tool for SOC analysts and MSSPs that detects **silent log sources** — firewalls, servers and other devices that have stopped sending logs to your SIEM. It checks log ingestion across **IBM QRadar**, **FortiSIEM** and **Seceon OTM** for many client environments at once, and alerts you by email or Slack when a device goes quiet.
+**SIEM Pulse** is an open-source Python tool for SOC analysts and MSSPs that detects **silent log sources** — firewalls, servers and other devices that have stopped sending logs to your SIEM. It checks log ingestion across **IBM QRadar**, **Splunk**, **Microsoft Sentinel**, **Elastic**, **FortiSIEM**, **Wazuh**, **Sumo Logic** and **Seceon** — or any platform with a REST API — for many client environments at once, and alerts you by email, Slack, Teams, PagerDuty, Opsgenie, ServiceNow or Jira when a device goes quiet.
 
 A device that stops logging is a blind spot: attacks on it go undetected. SIEM Pulse turns a manual daily "is everything still logging?" check into an automated, scheduled SIEM health check.
 
@@ -21,7 +21,7 @@ A device that stops logging is a blind spot: attacks on it go undetected. SIEM P
 - ⚡ Bulk lookups: one API call per SIEM tenant instead of one per device
 - 🔎 Inventory reconciliation: finds unmonitored log sources and devices the SIEM has never seen
 - 🚦 Per-tenant rate and concurrency limits
-- 🔌 Modular SIEM connectors (Seceon, QRadar, FortiSIEM)
+- 🔌 SIEM connectors: QRadar, Splunk, Microsoft Sentinel, Elastic, FortiSIEM, Wazuh, Sumo Logic, Seceon, plus a configurable generic REST connector and pip-installable plugins
 - 🕐 24-hour log staleness detection with configurable threshold
 - 📊 Console summary table + CSV report output
 - 🔔 Alerts on **changes only**: new issue, still open (reminder), recovered — with run history in SQLite
@@ -168,6 +168,45 @@ scheduler:
 ```
 
 ---
+
+## Supported SIEMs
+
+Use the name in the inventory's `siem_platform` column.
+
+| `siem_platform` | Platform | How last-seen is found | Credentials |
+|-----------------|----------|------------------------|-------------|
+| `qradar` | IBM QRadar | Log source `last_event_time` (bulk) or AQL | `QRADAR_SEC_TOKEN` |
+| `splunk` | Splunk Enterprise / Cloud | `tstats latest(_time) by host` via export search | `SPLUNK_TOKEN` |
+| `sentinel` | Microsoft Sentinel | KQL `max(TimeGenerated)` over CEF / Syslog / Windows / Heartbeat | `SENTINEL_CLIENT_ID` / `_SECRET` |
+| `elastic` | Elastic / OpenSearch | Composite aggregation, `max(@timestamp)` per host | `ELASTIC_API_KEY` |
+| `fortisiem` | FortiSIEM | Event query on `phRecvTime` (per device or grouped) | `FORTISIEM_USER` / `_PASS` |
+| `wazuh` | Wazuh | Agent `lastKeepAlive` | `WAZUH_USER` / `_PASS` |
+| `sumologic` | Sumo Logic | Search job `max(_receipttime) by _sourcehost` | `SUMO_ACCESS_ID` / `_KEY` |
+| `seceon` | Seceon aiSIEM | Configurable endpoint (per device or bulk) | `SECEON_API_KEY` |
+| `generic_rest` | Anything with a REST list of sources | Configurable path, fields and paging | `GENERIC_REST_TOKEN` |
+
+Example `generic_rest` recipe for **LogRhythm** (Admin API — check the field names against your version):
+
+```yaml
+siem:
+  generic_rest:
+    base_url: "https://logrhythm.example.com:8501"
+    path: "/lr-admin-api/logsources"
+    items_field: ""
+    name_field: "host.name"
+    ip_field: "host.name"
+    time_field: "maxLogDate"
+    pagination: offset
+    offset_param: offset
+    limit_param: count
+```
+
+**Plugins:** other packages can add connectors or alert channels without changing SIEM Pulse, through the entry-point groups `siem_pulse.connectors` and `siem_pulse.channels`:
+
+```toml
+[project.entry-points."siem_pulse.connectors"]
+graylog = "siem_pulse_graylog:GraylogClient"     # a BaseSIEMClient subclass
+```
 
 ## Connecting to Real SIEM APIs
 

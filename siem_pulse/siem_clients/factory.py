@@ -11,20 +11,61 @@ import logging
 import threading
 from typing import Any, Dict, Optional, Tuple
 
+from importlib.metadata import entry_points
+
 from .base_client import BaseSIEMClient
-from .seceon_client import SeceonClient
-from .qradar_client import QRadarClient
+from .elastic_client import ElasticClient
 from .fortisiem_client import FortiSIEMClient
+from .generic_rest_client import GenericRestClient
+from .qradar_client import QRadarClient
+from .seceon_client import SeceonClient
+from .sentinel_client import SentinelClient
+from .splunk_client import SplunkClient
+from .sumologic_client import SumoLogicClient
+from .wazuh_client import WazuhClient
 
 logger = logging.getLogger(__name__)
 
 # ─── Registry: map platform name → client class ────────────────────────────
-# To add a new SIEM, just add an entry here and create the corresponding module.
+# To add a new SIEM, add an entry here and create the corresponding module —
+# or publish a plugin package (see load_connector_plugins).
 SIEM_REGISTRY: Dict[str, type] = {
     "seceon": SeceonClient,
     "qradar": QRadarClient,
     "fortisiem": FortiSIEMClient,
+    "splunk": SplunkClient,
+    "sentinel": SentinelClient,
+    "elastic": ElasticClient,
+    "wazuh": WazuhClient,
+    "sumologic": SumoLogicClient,
+    "generic_rest": GenericRestClient,
 }
+_plugins_loaded = False
+
+
+def load_connector_plugins():
+    """
+    Register connectors published by other packages under the
+    `siem_pulse.connectors` entry-point group, e.g. in their pyproject.toml:
+
+        [project.entry-points."siem_pulse.connectors"]
+        graylog = "siem_pulse_graylog:GraylogClient"
+
+    The entry-point name becomes the inventory `siem_platform` value.
+    """
+    global _plugins_loaded
+    if _plugins_loaded:
+        return
+    _plugins_loaded = True
+    for ep in entry_points(group="siem_pulse.connectors"):
+        try:
+            cls = ep.load()
+            if not (isinstance(cls, type) and issubclass(cls, BaseSIEMClient)):
+                raise TypeError("not a BaseSIEMClient subclass")
+            SIEM_REGISTRY.setdefault(ep.name.lower(), cls)
+            logger.info(f"Loaded connector plugin '{ep.name}' from {ep.value}")
+        except Exception as e:
+            logger.error(f"Could not load connector plugin '{ep.name}': {e}")
 
 
 class SIEMClientFactory:
@@ -74,6 +115,7 @@ class SIEMClientFactory:
             ValueError: If siem_name is not registered.
         """
         siem_name = siem_name.lower().strip()
+        load_connector_plugins()
         if siem_name not in SIEM_REGISTRY:
             raise ValueError(
                 f"Unknown SIEM platform: '{siem_name}'. "
@@ -96,5 +138,6 @@ class SIEMClientFactory:
 
     @classmethod
     def list_supported(cls):
-        """Return list of registered SIEM platform names."""
+        """Return list of registered SIEM platform names (including plugins)."""
+        load_connector_plugins()
         return list(SIEM_REGISTRY.keys())
