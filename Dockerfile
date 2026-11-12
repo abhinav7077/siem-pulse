@@ -14,7 +14,7 @@
 # Behind a TLS-inspecting proxy, pass its CA so pip can reach PyPI:
 #   docker build --secret id=pip_ca,src=corp-ca.pem -t siem-pulse .
 
-FROM python:3.12-slim AS build
+FROM python:3.15-slim AS build
 WORKDIR /src
 COPY pyproject.toml README.md LICENSE NOTICE ./
 COPY siem_pulse ./siem_pulse
@@ -23,7 +23,7 @@ RUN --mount=type=secret,id=pip_ca,required=false \
  && pip wheel --no-cache-dir --no-deps --wheel-dir /wheels . \
  && pip wheel --no-cache-dir --wheel-dir /wheels pandas openpyxl pyyaml requests schedule python-dotenv
 
-FROM python:3.12-slim
+FROM python:3.15-slim
 LABEL org.opencontainers.image.title="SIEM Pulse" \
       org.opencontainers.image.description="Log source health monitor for SOC and MSSP teams" \
       org.opencontainers.image.source="https://github.com/abhinav7077/siem-pulse" \
